@@ -4,10 +4,23 @@ import Carbon
 /// Synthetic keyboard events. Only the agent (which holds the permissions) runs these.
 enum Synth {
     static func post(_ e: CGEvent?) { e?.post(tap: .cghidEventTap) }
+    static let source = CGEventSource(stateID: .hidSystemState)
     static func key(_ kc: CGKeyCode, down: Bool, flags: CGEventFlags = []) -> CGEvent? {
-        let e = CGEvent(keyboardEventSource: nil, virtualKey: kc, keyDown: down)
+        let e = CGEvent(keyboardEventSource: source, virtualKey: kc, keyDown: down)
         e?.flags = flags
         return e
+    }
+    /// Tap the Globe (fn) key. Returns the monotonic times of key down and key up.
+    static func globe(holdMs: Int) -> (down: Double, up: Double) {
+        let tDown = Clock.now()
+        post(key(63, down: true, flags: .maskSecondaryFn))
+        usleep(UInt32(max(holdMs, 1)) * 1000)
+        let tUp = Clock.now()
+        post(key(63, down: false, flags: []))
+        return (tDown, tUp)
+    }
+    static func trigger(_ name: String, holdMs: Int, gapMs: Int, spaceUpFirst: Bool) -> (down: Double, up: Double) {
+        name == "globe" ? globe(holdMs: holdMs) : ctrlSpace(holdMs: holdMs, gapMs: gapMs, spaceUpFirst: spaceUpFirst)
     }
     /// Press Ctrl+Space. Returns the monotonic times of Space down and Space up.
     static func ctrlSpace(holdMs: Int, gapMs: Int, spaceUpFirst: Bool) -> (down: Double, up: Double) {
@@ -29,28 +42,33 @@ enum Synth {
     }
 }
 
-/// Polls the selected input source every 0.5 ms and records every change.
+/// Polls the selected input source every millisecond and records every change.
+/// Polling runs on the main thread: Text Input Sources is not thread-safe (HIToolbox aborts
+/// when TISSelectInputSource and TISCopyCurrentKeyboardInputSource overlap on two threads).
 final class SourceMonitor {
     private var changes: [(Double, String)] = []
     private let lock = NSLock()
-    private var last: String
-    private var stop = false
+    private var last = ""
+    private var timer: DispatchSourceTimer?
     init() {
-        last = InputSources.currentID()
-        let th = Thread { [self] in
-            while !stop {
+        onMain {
+            last = InputSources.currentID()
+            let t = DispatchSource.makeTimerSource(queue: .main)
+            t.schedule(deadline: .now(), repeating: .milliseconds(1), leeway: .microseconds(200))
+            t.setEventHandler { [self] in
                 let id = InputSources.currentID()
                 if id != last { lock.lock(); changes.append((Clock.now(), id)); lock.unlock(); last = id }
-                usleep(500)
             }
+            t.resume()
+            timer = t
         }
-        th.qualityOfService = .userInteractive
-        th.start()
     }
-    func reset() { lock.lock(); changes = []; lock.unlock(); last = InputSources.currentID() }
+    func reset() { onMain { last = InputSources.currentID() }; lock.lock(); changes = []; lock.unlock() }
     func snapshot() -> [(Double, String)] { lock.lock(); defer { lock.unlock() }; return changes }
-    func finish() { stop = true }
+    func finish() { onMain { timer?.cancel(); timer = nil } }
 }
+
+func currentIDOnMain() -> String { onMain { InputSources.currentID() } }
 
 func agg(_ a: [Double]) -> [String: Any] {
     guard !a.isEmpty else { return ["n": 0] }
@@ -58,7 +76,7 @@ func agg(_ a: [Double]) -> [String: Any] {
 }
 
 func restoreSource(_ id: String) {
-    if InputSources.currentID() != id, let s = InputSources.find(id) { InputSources.select(s) }
+    onMain { if InputSources.currentID() != id, let s = InputSources.find(id) { InputSources.select(s) } }
 }
 
 /// Reproduces the FB24297598 experiment: Ctrl+Space with various hold times and release timings.
@@ -72,23 +90,25 @@ enum Measure {
         Cond(hold: 80, gap: 30, spaceUpFirst: true), Cond(hold: 80, gap: 30, spaceUpFirst: false),
     ]
 
-    static func run(agent: Agent, mode: String, trials: Int) -> [String: Any] {
+    static func run(agent: Agent, mode: String, trigger: String, trials: Int) -> [String: Any] {
         let systemMode = mode == "system"
-        onMain { if systemMode { agent.disabledTriggers.insert("ctrlSpace") } else { agent.disabledTriggers.remove("ctrlSpace") } }
-        defer { onMain { agent.disabledTriggers.remove("ctrlSpace") } }
-        let original = InputSources.currentID()
+        let globeWas = onMain { agent.config.triggers.globe }
+        onMain { agent.setTapEnabled(!systemMode); if !systemMode && trigger == "globe" { agent.forceTrigger("globe", true) } }
+        defer { onMain { agent.setTapEnabled(true); agent.forceTrigger("globe", globeWas) } }
+        let original = currentIDOnMain()
         let mon = SourceMonitor(); defer { mon.finish() }
         var out: [[String: Any]] = []
-        for c in conditions {
+        let conds = trigger == "globe" ? [Cond(hold: 40, gap: 0, spaceUpFirst: true), Cond(hold: 80, gap: 0, spaceUpFirst: true), Cond(hold: 150, gap: 0, spaceUpFirst: true), Cond(hold: 300, gap: 0, spaceUpFirst: true)] : conditions
+        for c in conds {
             var persisted = 0, reverted = 0, none = 0
             var latDown: [Double] = [], latUp: [Double] = [], revertAfter: [Double] = []
             for _ in 0..<trials {
                 mon.reset()
-                let before = InputSources.currentID()
-                let t = Synth.ctrlSpace(holdMs: c.hold, gapMs: c.gap, spaceUpFirst: c.spaceUpFirst)
+                let before = currentIDOnMain()
+                let t = Synth.trigger(trigger, holdMs: c.hold, gapMs: c.gap, spaceUpFirst: c.spaceUpFirst)
                 usleep(1_200_000)
                 let ch = mon.snapshot()
-                let after = InputSources.currentID()
+                let after = currentIDOnMain()
                 if ch.isEmpty { none += 1 }
                 else if after == before { reverted += 1; if ch.count >= 2 { revertAfter.append((ch[1].0 - ch[0].0) * 1000) } }
                 else { persisted += 1; latDown.append((ch[0].0 - t.down) * 1000); latUp.append((ch[0].0 - t.up) * 1000) }
@@ -98,8 +118,8 @@ enum Measure {
                         "latencyFromKeyDownMs": agg(latDown), "latencyFromKeyUpMs": agg(latUp), "revertAfterMs": agg(revertAfter)])
         }
         restoreSource(original)
-        return ["mode": mode, "trials": trials, "startSource": original, "conditions": out,
-                "handledBy": systemMode ? "macOS hotkey (mgnov trigger disabled)" : "mgnov"]
+        return ["mode": mode, "trigger": trigger, "trials": trials, "startSource": original, "conditions": out,
+                "handledBy": systemMode ? "macOS hotkey (mgnov tap suspended)" : "mgnov"]
     }
 }
 
@@ -133,11 +153,12 @@ final class SelfTestWindow {
 enum SelfTest {
     static let keys: [CGKeyCode] = [12, 13, 14, 15, 17, 16]   // q w e r t y
 
-    static func run(agent: Agent, mode: String, trials: Int, typeGapMs: Int) -> [String: Any] {
+    static func run(agent: Agent, mode: String, trigger: String, trials: Int, typeGapMs: Int) -> [String: Any] {
         let systemMode = mode == "system"
-        onMain { if systemMode { agent.disabledTriggers.insert("ctrlSpace") } else { agent.disabledTriggers.remove("ctrlSpace") } }
-        defer { onMain { agent.disabledTriggers.remove("ctrlSpace") } }
-        let original = InputSources.currentID()
+        let globeWas = onMain { agent.config.triggers.globe }
+        onMain { agent.setTapEnabled(!systemMode); if !systemMode && trigger == "globe" { agent.forceTrigger("globe", true) } }
+        defer { onMain { agent.setTapEnabled(true); agent.forceTrigger("globe", globeWas) } }
+        let original = currentIDOnMain()
         let win = onMain { SelfTestWindow() }
         onMain { win.show() }
         usleep(600_000)
@@ -154,12 +175,14 @@ enum SelfTest {
         var wrongTotal = 0, charsTotal = 0, noSwitch = 0
         for i in 0..<trials {
             onMain { win.text.string = "" }
-            let before = InputSources.currentID()
-            guard let targetID = onMain({ agent.nextID(after: before) }),
-                  let target = InputSources.enabledKeyboardSources().first(where: { $0.id == targetID }),
-                  let tr = KeyTranslator(target.tis) else { continue }
-            let expected = keys.compactMap { tr.translate(keyCode: UInt16($0), flags: [], keyDown: true) }.joined()
-            _ = Synth.ctrlSpace(holdMs: 40, gapMs: 0, spaceUpFirst: true)
+            let before = currentIDOnMain()
+            guard let expected: String = onMain({
+                guard let targetID = agent.nextID(after: before),
+                      let target = InputSources.enabledKeyboardSources().first(where: { $0.id == targetID }),
+                      let tr = KeyTranslator(target.tis) else { return nil }
+                return keys.compactMap { tr.translate(keyCode: UInt16($0), flags: [], keyDown: true) }.joined()
+            }) else { continue }
+            _ = Synth.trigger(trigger, holdMs: 40, gapMs: 0, spaceUpFirst: true)
             if typeGapMs > 0 { usleep(UInt32(typeGapMs) * 1000) }
             for k in keys {
                 Synth.post(Synth.key(k, down: true)); usleep(6_000)
@@ -167,7 +190,7 @@ enum SelfTest {
             }
             usleep(600_000)
             let got = onMain { win.text.string }
-            let after = InputSources.currentID()
+            let after = currentIDOnMain()
             if after == before { noSwitch += 1 }
             let wrong = zip(got, expected).filter { $0 != $1 }.count + abs(got.count - expected.count)
             wrongTotal += wrong; charsTotal += expected.count
@@ -176,7 +199,7 @@ enum SelfTest {
         }
         onMain { win.close() }
         restoreSource(original)
-        return ["mode": mode, "trials": trials, "typeGapMs": typeGapMs, "wrongChars": wrongTotal, "chars": charsTotal,
-                "noSwitch": noSwitch, "results": results, "handledBy": systemMode ? "macOS hotkey (mgnov trigger disabled)" : "mgnov"]
+        return ["mode": mode, "trigger": trigger, "trials": trials, "typeGapMs": typeGapMs, "wrongChars": wrongTotal, "chars": charsTotal,
+                "noSwitch": noSwitch, "results": results, "handledBy": systemMode ? "macOS hotkey (mgnov tap suspended)" : "mgnov"]
     }
 }

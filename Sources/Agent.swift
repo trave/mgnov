@@ -18,6 +18,7 @@ final class Agent: NSObject {
     var config: Config
     private var tap: CFMachPort?
     private(set) var tapInstalled = false
+    private(set) var suspended = false
     /// Runtime overrides (the measurement modes use them). Values: "ctrlSpace", "globe", "capsLock".
     var disabledTriggers = Set<String>()
     let startedAt = Date()
@@ -84,6 +85,14 @@ final class Agent: NSObject {
         return true
     }
 
+    /// Baseline measurements turn the tap off entirely so macOS handles the keys exactly as without mgnov.
+    func setTapEnabled(_ on: Bool) {
+        guard let tap = tap else { return }
+        suspended = !on
+        CGEvent.tapEnable(tap: tap, enable: on)
+        Log.info(on ? "tap resumed" : "tap suspended for a baseline measurement")
+    }
+
     func triggerOn(_ name: String) -> Bool {
         if disabledTriggers.contains(name) { return false }
         switch name {
@@ -97,11 +106,13 @@ final class Agent: NSObject {
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         let pass = Unmanaged.passUnretained(event)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if suspended { return pass }          // we turned it off on purpose; leave it off
             if let tap = tap { CGEvent.tapEnable(tap: tap, enable: true) }
             tapReenables += 1
             Log.warn("tap disabled by system (\(type.rawValue)); re-enabled")
             return pass
         }
+        if suspended { return pass }
         let t = Clock.now()
         let kc = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         let flags = event.flags
@@ -259,6 +270,16 @@ final class Agent: NSObject {
         }
         if cycleIDs().count < 2 { w.append("Fewer than two enabled keyboard input sources; nothing to switch between.") }
         return w
+    }
+
+    /// Measurement helper: force a trigger on for the duration of a run.
+    func forceTrigger(_ name: String, _ on: Bool) {
+        if on { disabledTriggers.remove(name) }
+        switch name {
+        case "globe": config.triggers.globe = on
+        case "ctrlSpace": config.triggers.ctrlSpace = on
+        default: break
+        }
     }
 
     func status() -> [String: Any] {

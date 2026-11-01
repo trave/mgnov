@@ -11,13 +11,15 @@ enum Commands {
         case "status": return onMain { agent.status() }
         case "stats": return onMain { agent.stats(last: int("last", 15)) }
         case "sources":
-            let cur = InputSources.currentID()
-            return ["current": cur, "sources": InputSources.enabledKeyboardSources().map { ["id": $0.id, "name": $0.name, "layout": $0.isLayout, "current": $0.id == cur] }]
+            return onMain {
+                let cur = InputSources.currentID()
+                return ["current": cur, "sources": InputSources.enabledKeyboardSources().map { ["id": $0.id, "name": $0.name, "layout": $0.isLayout, "current": $0.id == cur] }]
+            }
         case "switch":
             let to = onMain { agent.doSwitch(trigger: "cli", at: Clock.now(), to: req["id"] as? String) }
-            return ["switched": to != nil, "current": InputSources.currentID()]
-        case "measure": return Measure.run(agent: agent, mode: str("mode", "mgnov"), trials: int("trials", 5))
-        case "selftest": return SelfTest.run(agent: agent, mode: str("mode", "mgnov"), trials: int("trials", 10), typeGapMs: int("gap", 0))
+            return ["switched": to != nil, "current": onMain { InputSources.currentID() }]
+        case "measure": return Measure.run(agent: agent, mode: str("mode", "mgnov"), trigger: str("trigger", "ctrlSpace"), trials: int("trials", 5))
+        case "selftest": return SelfTest.run(agent: agent, mode: str("mode", "mgnov"), trigger: str("trigger", "ctrlSpace"), trials: int("trials", 10), typeGapMs: int("gap", 0))
         case "log": return ["lines": Log.recent(int("last", 50))]
         case "set":
             let name = str("trigger", ""); let on = (req["enabled"] as? Bool) ?? true

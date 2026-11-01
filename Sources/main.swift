@@ -9,9 +9,9 @@ mgnov \(mgnovVersion) — instant, race-free keyboard layout switching for macOS
   mgnov sources                    enabled keyboard input sources
   mgnov switch [ID]                switch to the next source (or to ID)
   mgnov enable|disable TRIGGER     TRIGGER = ctrlSpace | globe | capsLock  (saved to config)
-  mgnov measure [--mode system|mgnov] [--trials N]
-                                   FB24297598-style Ctrl+Space timing experiment (default: mgnov, 5)
-  mgnov selftest [--mode system|mgnov] [--trials N] [--gap MS]
+  mgnov measure [--mode system|mgnov] [--trigger ctrlSpace|globe] [--trials N]
+                                   timing experiment with synthetic key presses (default: mgnov, ctrlSpace, 5)
+  mgnov selftest [--mode system|mgnov] [--trigger ctrlSpace|globe] [--trials N] [--gap MS]
                                    type right after a switch into a real text view; count wrong letters
   mgnov log [--last N]             recent agent log lines
   mgnov config                     print the config file path
@@ -82,7 +82,7 @@ func pretty(_ obj: Any, _ indent: String = "") -> String {
 
 func saveReport(_ kind: String, _ obj: [String: Any]) {
     let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
-    let url = Config.dir.appendingPathComponent("\(kind)-\(obj["mode"] as? String ?? "x")-\(f.string(from: Date())).json")
+    let url = Config.dir.appendingPathComponent("\(kind)-\(obj["mode"] as? String ?? "x")-\(obj["trigger"] as? String ?? "")-\(f.string(from: Date())).json")
     try? pretty(obj).data(using: .utf8)?.write(to: url)
     print("report saved: \(url.path)")
 }
@@ -109,17 +109,22 @@ func printStatus(_ s: [String: Any]) {
     if let w = s["warnings"] as? [String], !w.isEmpty { print("warnings:"); w.forEach { print("  ! \($0)") } }
 }
 
+func pad(_ s: Any, _ w: Int) -> String { let t = "\(s)"; return t.count >= w ? t : t + String(repeating: " ", count: w - t.count) }
+
 func printMeasure(_ r: [String: Any]) {
-    print("Ctrl+Space experiment — handled by: \(r["handledBy"] ?? "")   trials per condition: \(r["trials"] ?? "")")
-    print(String(format: "%-8@ %-10@ %-15@ %9@ %9@ %6@ %-26@ %-26@ %@", "hold", "gap", "order", "persisted", "reverted", "none", "lat. from key-down (ms)", "lat. from key-up (ms)", "revert after (ms)"))
-    func a(_ x: Any?) -> String { guard let d = x as? [String: Any], (d["n"] as? Int ?? 0) > 0 else { return "-" }; return "min \(d["min"]!) avg \(d["avg"]!) max \(d["max"]!)" }
+    print("\(r["trigger"] ?? "") experiment — handled by: \(r["handledBy"] ?? "")   trials per condition: \(r["trials"] ?? "")")
+    let widths = [7, 6, 15, 10, 9, 5, 27, 27]
+    func row(_ cols: [Any]) -> String { zip(cols, widths).map { pad($0.0, $0.1) }.joined(separator: " ") + " \(cols.last!)" }
+    print(row(["hold", "gap", "release order", "persisted", "reverted", "none", "lat. from key-down (ms)", "lat. from key-up (ms)", "revert after (ms)"]))
+    func f(_ x: Any?) -> String { String(format: "%.1f", (x as? NSNumber)?.doubleValue ?? 0) }
+    func a(_ x: Any?) -> String { guard let d = x as? [String: Any], (d["n"] as? Int ?? 0) > 0 else { return "-" }; return "min \(f(d["min"])) avg \(f(d["avg"])) max \(f(d["max"]))" }
     for c in r["conditions"] as? [[String: Any]] ?? [] {
-        print(String(format: "%-8@ %-10@ %-15@ %9@ %9@ %6@ %-26@ %-26@ %@", "\(c["holdMs"]!)ms", "\(c["releaseGapMs"]!)ms", "\(c["releaseOrder"]!)", "\(c["persisted"]!)", "\(c["reverted"]!)", "\(c["noResponse"]!)", a(c["latencyFromKeyDownMs"]), a(c["latencyFromKeyUpMs"]), a(c["revertAfterMs"])))
+        print(row(["\(c["holdMs"]!)ms", "\(c["releaseGapMs"]!)ms", c["releaseOrder"]!, c["persisted"]!, c["reverted"]!, c["noResponse"]!, a(c["latencyFromKeyDownMs"]), a(c["latencyFromKeyUpMs"]), a(c["revertAfterMs"])]))
     }
 }
 
 func printSelfTest(_ r: [String: Any]) {
-    print("self-test — handled by: \(r["handledBy"] ?? "")   trials: \(r["trials"] ?? "")   typing started \(r["gap"] ?? r["typeGapMs"] ?? 0) ms after the switch")
+    print("self-test (\(r["trigger"] ?? "")) — handled by: \(r["handledBy"] ?? "")   trials: \(r["trials"] ?? "")   typing started \(r["typeGapMs"] ?? 0) ms after the switch")
     for t in r["results"] as? [[String: Any]] ?? [] {
         print(String(format: "  #%-3@ %@ -> %@  expected %@  got %@  wrong %@%@", "\(t["trial"]!)", "\(t["from"]!)", "\(t["to"]!)", "\(t["expected"]!)", "\(t["got"]!)", "\(t["wrongChars"]!)", (t["switched"] as? Bool == false) ? "  (NO SWITCH)" : ""))
     }
@@ -143,10 +148,10 @@ case "enable", "disable":
     guard let t = positional() else { print("trigger name required: ctrlSpace | globe | capsLock"); exit(1) }
     print(pretty(request(["cmd": "set", "trigger": t, "enabled": cmd == "enable"])))
 case "measure":
-    let r = request(["cmd": "measure", "mode": opt("--mode", "mgnov"), "trials": optInt("--trials", 5)])
+    let r = request(["cmd": "measure", "mode": opt("--mode", "mgnov"), "trigger": opt("--trigger", "ctrlSpace"), "trials": optInt("--trials", 5)])
     printMeasure(r); saveReport("measure", r)
 case "selftest":
-    let r = request(["cmd": "selftest", "mode": opt("--mode", "mgnov"), "trials": optInt("--trials", 10), "gap": optInt("--gap", 0)])
+    let r = request(["cmd": "selftest", "mode": opt("--mode", "mgnov"), "trigger": opt("--trigger", "ctrlSpace"), "trials": optInt("--trials", 10), "gap": optInt("--gap", 0)])
     printSelfTest(r); saveReport("selftest", r)
 case "log": (request(["cmd": "log", "last": optInt("--last", 50)])["lines"] as? [String] ?? []).forEach { print($0) }
 case "quit": _ = request(["cmd": "quit"]); print("agent asked to quit")
