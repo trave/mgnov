@@ -9,7 +9,7 @@ ifeq ($(SIGN_ID),)
 SIGN_ID  := -
 endif
 
-.PHONY: all build run stop install uninstall cert clean
+.PHONY: all build sign run stop install uninstall cert clean
 
 all: build
 build: $(BIN)
@@ -23,8 +23,13 @@ $(BIN): $(SRCS) Resources/Info.plist Makefile
 	@if [ "$(SIGN_ID)" = "-" ]; then echo "note: ad-hoc signed. macOS forgets the Accessibility grant on every rebuild; run 'make cert' once to fix that."; fi
 	@echo "built $(APP)"
 
+# Re-sign with the current identity (cheap; the build rule does not notice a new certificate)
+sign: build
+	@codesign --force --sign "$(SIGN_ID)" --identifier dev.trave.mgnov $(APP)
+	@codesign -dv $(APP) 2>&1 | grep -E '^(Signature|Authority)=' | head -2
+
 # Development run: launches the app through LaunchServices so TCC attributes permissions to Mgnov.app
-run: build stop
+run: sign stop
 	open -n $(APP)
 	@sleep 1; build/mgnov status || true
 
