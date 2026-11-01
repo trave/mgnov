@@ -4,7 +4,8 @@ BIN      := $(APP)/Contents/MacOS/mgnov
 SRCS     := $(wildcard Sources/*.swift)
 SWIFTC   ?= swiftc
 # Sign with a stable identity when one exists so TCC grants survive rebuilds (see `make cert`).
-SIGN_ID  ?= $(shell security find-identity -v -p codesigning 2>/dev/null | grep -o '"mgnov-dev"' | head -1 | tr -d '"')
+# (the SHA-1 hash, not the name: the name can match twice after the certificate is trusted)
+SIGN_ID  ?= $(shell security find-identity -v -p codesigning 2>/dev/null | grep '"mgnov-dev"' | head -1 | awk '{print $$2}')
 ifeq ($(SIGN_ID),)
 SIGN_ID  := -
 endif
