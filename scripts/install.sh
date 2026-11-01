@@ -12,6 +12,7 @@ BACKUP="$STATE/system-settings-backup.json"
 CONFIG="$STATE/config.json"
 UID_="$(id -u)"
 
+KEEP_KEYS=0; [ "${1:-}" = "--keep-system-keys" ] && KEEP_KEYS=1
 [ -d "$APP_SRC" ] || { echo "build first: make"; exit 1; }
 mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents" "$STATE"
 
@@ -29,18 +30,20 @@ p0=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:value:parameters
 p1=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:value:parameters:1" "$HK" 2>/dev/null || echo 49)
 p2=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:value:parameters:2" "$HK" 2>/dev/null || echo 262144)
 
-if [ ! -f "$BACKUP" ]; then
+if [ "$KEEP_KEYS" = "1" ]; then
+  echo "→ system key settings left untouched (--keep-system-keys)"
+elif [ ! -f "$BACKUP" ]; then
   fn_prev=$(defaults read com.apple.HIToolbox AppleFnUsageType 2>/dev/null || echo "unset")
   hk60_prev=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:enabled" ~/Library/Preferences/com.apple.symbolichotkeys.plist 2>/dev/null || echo "unset")
   printf '{"AppleFnUsageType": "%s", "hotkey60enabled": "%s", "hotkey60params": [%s, %s, %s]}\n' "$fn_prev" "$hk60_prev" "$p0" "$p1" "$p2" > "$BACKUP"
   echo "→ previous system settings saved to $BACKUP"
 fi
 
-if [ "$globe_on" = "1" ]; then
+if [ "$KEEP_KEYS" = "0" ] && [ "$globe_on" = "1" ]; then
   echo "→ 'Press 🌐 key to' = Do Nothing (mgnov handles the Globe tap itself)"
   defaults write com.apple.HIToolbox AppleFnUsageType -int 0
 fi
-if [ "$hotkey_on" = "1" ]; then
+if [ "$KEEP_KEYS" = "0" ] && [ "$hotkey_on" = "1" ]; then
   echo "→ disabling system hotkey 60 (Select previous input source; parameters $p0,$p1,$p2 kept)"
   defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 60 "{ enabled = 0; value = { parameters = ($p0, $p1, $p2); type = standard; }; }"
 fi
@@ -64,11 +67,13 @@ PL
 launchctl bootstrap "gui/$UID_" "$PLIST"
 echo "→ LaunchAgent $LABEL loaded (KeepAlive: it is never idle-killed, unlike TextInputSwitcher)"
 
-sleep 1
-echo
-echo "Now grant permissions ONCE to Mgnov.app (not to Terminal, not to Claude):"
-echo "  System Settings → Privacy & Security → Accessibility → + → $APP_DST"
-echo "  (if macOS also asks for Input Monitoring, add it there too)"
-open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" 2>/dev/null || true
-echo
-echo "Then check:  $APP_DST/Contents/MacOS/mgnov status"
+sleep 1.5
+if "$APP_DST/Contents/MacOS/mgnov" status 2>/dev/null | grep -q 'event tap: 1'; then
+  echo "→ agent is running and trusted"
+else
+  echo
+  echo "Now grant permissions ONCE to Mgnov.app (not to Terminal, not to Claude):"
+  echo "  System Settings → Privacy & Security → Accessibility → + → $APP_DST"
+  open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" 2>/dev/null || true
+fi
+echo "Check any time:  $APP_DST/Contents/MacOS/mgnov status"

@@ -37,8 +37,8 @@ run: sign stop
 stop:
 	-@pkill -x mgnov 2>/dev/null; sleep 0.3
 
-install: build
-	scripts/install.sh
+install: sign
+	scripts/install.sh $(ARGS)
 
 uninstall:
 	scripts/uninstall.sh

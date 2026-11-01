@@ -10,7 +10,11 @@ struct SwitchRecord: Codable {
     var notifyMs: Double?     // trigger -> system-wide "source changed" notification
     var protectedKeys: Int    // keystrokes re-translated to the new layout inside the window
     var revertCaught: Bool
+    var app: String           // frontmost app at the time of the switch
+    var slow: Bool            // notification later than slowMs, or never
 }
+
+let slowMs = 250.0
 
 /// The resident part: an active session event tap that switches on the trigger key itself,
 /// re-translates keystrokes that race the switch, and re-applies a switch the system reverts.
@@ -39,7 +43,7 @@ final class Agent: NSObject {
 
     // stats
     private(set) var records: [SwitchRecord] = []
-    private(set) var switches = 0, protectedKeys = 0, revertsCaught = 0, tapReenables = 0
+    private(set) var switches = 0, protectedKeys = 0, revertsCaught = 0, tapReenables = 0, slowSwitches = 0, noNotify = 0
     private var capsRemapped = false
 
     init(config: Config) { self.config = config; super.init() }
@@ -195,10 +199,23 @@ final class Agent: NSObject {
         watchdogUntil = t1 + Double(config.watchdogMs) / 1000
         watchdogFired = false
         switches += 1
+        let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
         records.append(SwitchRecord(at: Date().timeIntervalSince1970, trigger: trigger, from: fromID, to: target.id,
-                                    selectMs: (t1 - t0) * 1000, notifyMs: nil, protectedKeys: 0, revertCaught: false))
-        if records.count > 500 { records.removeFirst(records.count - 500) }
-        Log.info(String(format: "switch [%@] %@ -> %@  select=%.2f ms%@", trigger, short(fromID), short(target.id), (t1 - t0) * 1000, ok ? "" : "  (TISSelectInputSource FAILED)"))
+                                    selectMs: (t1 - t0) * 1000, notifyMs: nil, protectedKeys: 0, revertCaught: false, app: app, slow: false))
+        if records.count > 5000 { records.removeFirst(records.count - 1000) }
+        Log.info(String(format: "switch [%@] %@ -> %@  select=%.2f ms  app=%@%@", trigger, short(fromID), short(target.id), (t1 - t0) * 1000, app, ok ? "" : "  (TISSelectInputSource FAILED)"))
+        let idx = records.count - 1, stamp = records[idx].at
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self = self, idx < self.records.count, self.records[idx].at == stamp else { return }
+            var r = self.records[idx]
+            if let nm = r.notifyMs {
+                if nm > slowMs { r.slow = true; self.slowSwitches += 1; Log.warn(String(format: "SLOW switch: notification %.0f ms after the key, app=%@ (%@ -> %@)", nm, r.app, short(r.from), short(r.to))) }
+            } else {
+                r.slow = true; self.noNotify += 1
+                Log.warn("NO notification within 1 s after the switch, app=\(r.app) (\(short(r.from)) -> \(short(r.to))); current=\(short(InputSources.currentID()))")
+            }
+            self.records[idx] = r
+        }
         return target.id
     }
 
@@ -298,14 +315,14 @@ final class Agent: NSObject {
             "config": ["retranslateWindowMs": config.retranslateWindowMs, "watchdogMs": config.watchdogMs, "globeTapWindowMs": config.globeTapWindowMs, "cycle": cycleIDs(), "file": Config.file.path],
             "current": cur,
             "sources": sources.map { ["id": $0.id, "name": $0.name, "layout": $0.isLayout, "current": $0.id == cur] },
-            "counters": ["switches": switches, "protectedKeys": protectedKeys, "revertsCaught": revertsCaught, "tapReenables": tapReenables],
+            "counters": ["switches": switches, "protectedKeys": protectedKeys, "revertsCaught": revertsCaught, "tapReenables": tapReenables, "slowSwitches": slowSwitches, "noNotify": noNotify],
             "warnings": systemWarnings(),
         ]
     }
 
     func stats(last n: Int) -> [String: Any] {
         let recent = records.suffix(n).map { r -> [String: Any] in
-            var d: [String: Any] = ["at": r.at, "trigger": r.trigger, "from": short(r.from), "to": short(r.to),
+            var d: [String: Any] = ["at": r.at, "trigger": r.trigger, "from": short(r.from), "to": short(r.to), "app": r.app, "slow": r.slow,
                                     "selectMs": num(r.selectMs, 2), "protectedKeys": r.protectedKeys, "revertCaught": r.revertCaught]
             if let nm = r.notifyMs { d["notifyMs"] = num(nm) }
             return d
@@ -317,7 +334,15 @@ final class Agent: NSObject {
             let s = a.sorted()
             return ["n": a.count, "min": num(s.first!), "median": num(s[s.count / 2]), "p95": num(s[min(s.count - 1, Int(Double(s.count) * 0.95))]), "max": num(s.last!)]
         }
+        var byApp: [String: [String: Any]] = [:]
+        for (app, rs) in Dictionary(grouping: records, by: { $0.app }) {
+            let n = rs.compactMap { $0.notifyMs }.sorted()
+            byApp[app] = ["switches": rs.count, "slow": rs.filter { $0.slow && $0.notifyMs != nil }.count, "noNotify": rs.filter { $0.notifyMs == nil && $0.slow }.count,
+                          "reverts": rs.filter { $0.revertCaught }.count, "protectedKeys": rs.reduce(0) { $0 + $1.protectedKeys },
+                          "notifyMedianMs": n.isEmpty ? 0 : num(n[n.count / 2]), "notifyMaxMs": n.isEmpty ? 0 : num(n.last!)]
+        }
         return ["switches": switches, "protectedKeys": protectedKeys, "revertsCaught": revertsCaught, "tapReenables": tapReenables,
-                "selectMs": agg(sel), "notifyMs": agg(notify), "recent": recent]
+                "slowSwitches": slowSwitches, "noNotify": noNotify, "uptimeSec": Int(Date().timeIntervalSince(startedAt)),
+                "selectMs": agg(sel), "notifyMs": agg(notify), "byApp": byApp, "recent": recent]
     }
 }

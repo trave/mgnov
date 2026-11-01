@@ -5,7 +5,7 @@ mgnov \(mgnovVersion) — instant, race-free keyboard layout switching for macOS
 
   mgnov agent                      run the resident agent (normally started by launchd / the app bundle)
   mgnov status                     agent state, sources, effective triggers, warnings
-  mgnov stats [--last N]           switch latency stats and recent switches
+  mgnov stats [--last N] [--json]  switch latency stats, per-app table, recent switches
   mgnov sources                    enabled keyboard input sources
   mgnov switch [ID]                switch to the next source (or to ID)
   mgnov enable|disable TRIGGER     TRIGGER = hotkey | globe | capsLock  (saved to config)
@@ -138,7 +138,24 @@ case "help", "-h", "--help": print(usage)
 case "version": print(mgnovVersion)
 case "config": print(Config.file.path)
 case "status": printStatus(request(["cmd": "status"]))
-case "stats": print(pretty(request(["cmd": "stats", "last": optInt("--last", 15)])))
+case "stats":
+    let r = request(["cmd": "stats", "last": optInt("--last", 15)])
+    func f(_ x: Any?) -> String { String(format: "%.1f", (x as? NSNumber)?.doubleValue ?? 0) }
+    let n = r["notifyMs"] as? [String: Any] ?? [:], s = r["selectMs"] as? [String: Any] ?? [:]
+    print("uptime \(r["uptimeSec"] ?? 0)s   switches \(r["switches"] ?? 0)   protected keys \(r["protectedKeys"] ?? 0)   reverts caught \(r["revertsCaught"] ?? 0)   slow (>\(Int(slowMs)) ms) \(r["slowSwitches"] ?? 0)   no notification \(r["noNotify"] ?? 0)")
+    print("select: median \(f(s["median"])) p95 \(f(s["p95"])) max \(f(s["max"])) ms    notification after key: median \(f(n["median"])) p95 \(f(n["p95"])) max \(f(n["max"])) ms")
+    if let apps = r["byApp"] as? [String: [String: Any]], !apps.isEmpty {
+        print(pad("app", 36) + " " + pad("switches", 9) + pad("slow", 6) + pad("none", 6) + pad("reverts", 9) + pad("notify med", 11) + "notify max")
+        for (app, d) in apps.sorted(by: { ($0.value["switches"] as? Int ?? 0) > ($1.value["switches"] as? Int ?? 0) }) {
+            print(pad(app, 36) + " " + pad(d["switches"] ?? 0, 9) + pad(d["slow"] ?? 0, 6) + pad(d["noNotify"] ?? 0, 6) + pad(d["reverts"] ?? 0, 9) + pad(f(d["notifyMedianMs"]), 11) + f(d["notifyMaxMs"]))
+        }
+    }
+    if args.contains("--json") { print(pretty(r)) }
+    else if let rec = r["recent"] as? [[String: Any]], !rec.isEmpty {
+        print("recent:")
+        let df = DateFormatter(); df.dateFormat = "HH:mm:ss"
+        for x in rec { print("  \(df.string(from: Date(timeIntervalSince1970: (x["at"] as? Double) ?? 0)))  \(pad(x["from"] ?? "", 8))-> \(pad(x["to"] ?? "", 8)) notify \(x["notifyMs"].map { f($0) } ?? "-   ") ms  keys \(x["protectedKeys"] ?? 0)  \(x["app"] ?? "")\((x["slow"] as? Bool == true) ? "  SLOW" : "")\((x["revertCaught"] as? Bool == true) ? "  REVERT" : "")") }
+    }
 case "sources":
     let r = request(["cmd": "sources"])
     for x in r["sources"] as? [[String: Any]] ?? [] { print("\(x["current"] as? Bool == true ? "*" : " ") \(x["id"] ?? "")  (\(x["name"] ?? ""))") }
