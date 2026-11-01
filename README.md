@@ -10,7 +10,7 @@ come out in the old layout, or nothing switches at all. The analysis with measur
 
 mgnov is a small resident agent that:
 
-- switches on **key down** of Ctrl+Space (or Caps Lock), and on a clean Globe tap, with no HUD;
+- switches on **key down** of your input-source hotkey (whatever macOS has under "Select the previous input source": ⌘Space, ⌃Space, …) or Caps Lock, and on a clean Globe tap, with no HUD;
 - for 300 ms after each switch re-translates every keystroke with the **new** layout and puts
   the characters on the event, so letters that race the switch still come out right;
 - re-applies the switch if macOS reverts it within 700 ms;
@@ -40,10 +40,9 @@ per press. Use the development run for measurements, then install.
 ## Measure before/after
 
 ```bash
-build/mgnov measure  --mode system --trials 5   # the macOS hotkey path (FB24297598 reproduction)
-build/mgnov measure  --mode mgnov  --trials 5   # the same keystrokes handled by mgnov
-build/mgnov selftest --mode system --trials 10  # type "qwerty" right after a switch into a real text view
-build/mgnov selftest --mode mgnov  --trials 10  # wrong letters should be 0
+build/mgnov measure  --mode mgnov  --trials 5   # synthetic hotkey presses handled by mgnov
+build/mgnov selftest --mode mgnov  --trials 10  # type "qwerty" right after a switch into a real text view; wrong letters should be 0
+build/mgnov measure  --mode system --trials 5   # baseline attempt: on macOS 26.5 the system switcher ignores synthetic presses (see docs)
 ```
 
 `measure` posts Ctrl+Space with different hold times and release timings and watches the
@@ -67,7 +66,7 @@ restored by `make uninstall`).
 mgnov status | stats | sources | switch [ID] | enable|disable TRIGGER | measure | selftest | log | quit
 ```
 
-Triggers: `ctrlSpace` (default on), `globe` (default on), `capsLock` (off; remaps Caps Lock to
+Triggers: `hotkey` (default on; the key is read from the system hotkey, override with `"hotkey": {"keyCode": 49, "flags": 1048576}` in the config), `globe` (default on), `capsLock` (off; remaps Caps Lock to
 F18 through `hidutil` while the agent runs). Config: `~/Library/Application Support/mgnov/config.json`.
 
 The CLI needs no permissions. Only the agent (`Mgnov.app`) holds Accessibility; the CLI talks

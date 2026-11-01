@@ -18,20 +18,20 @@ enum Commands {
         case "switch":
             let to = onMain { agent.doSwitch(trigger: "cli", at: Clock.now(), to: req["id"] as? String) }
             return ["switched": to != nil, "current": onMain { InputSources.currentID() }]
-        case "measure": return Measure.run(agent: agent, mode: str("mode", "mgnov"), trigger: str("trigger", "ctrlSpace"), trials: int("trials", 5))
-        case "selftest": return SelfTest.run(agent: agent, mode: str("mode", "mgnov"), trigger: str("trigger", "ctrlSpace"), trials: int("trials", 10), typeGapMs: int("gap", 0))
+        case "measure": return Measure.run(agent: agent, mode: str("mode", "mgnov"), trigger: str("trigger", "hotkey"), trials: int("trials", 5))
+        case "selftest": return SelfTest.run(agent: agent, mode: str("mode", "mgnov"), trigger: str("trigger", "hotkey"), trials: int("trials", 10), typeGapMs: int("gap", 0))
         case "log": return ["lines": Log.recent(int("last", 50))]
         case "set":
             let name = str("trigger", ""); let on = (req["enabled"] as? Bool) ?? true
             return onMain {
                 switch name {
-                case "ctrlSpace": agent.config.triggers.ctrlSpace = on
+                case "hotkey": agent.config.triggers.hotkey = on
                 case "globe": agent.config.triggers.globe = on
                 case "capsLock": agent.config.triggers.capsLock = on
                 default: return ["ok": false, "error": "unknown trigger \(name)"]
                 }
                 agent.config.save()
-                return ["triggers": ["ctrlSpace": agent.triggerOn("ctrlSpace"), "globe": agent.triggerOn("globe"), "capsLock": agent.triggerOn("capsLock")],
+                return ["triggers": ["hotkey": agent.triggerOn("hotkey"), "globe": agent.triggerOn("globe"), "capsLock": agent.triggerOn("capsLock")],
                         "note": name == "capsLock" ? "restart the agent to apply the Caps Lock remap" : ""]
             }
         case "quit":

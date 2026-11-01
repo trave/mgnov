@@ -31,7 +31,8 @@ final class Agent: NSObject {
     private var pendingUntil = 0.0
     private var watchdogUntil = 0.0
     private var watchdogFired = false
-    private var swallowSpaceUp = false
+    private var swallowKeyUp: UInt16? = nil
+    private(set) var hotkey = Hotkey.ctrlSpace
 
     // Globe (fn) tap detection
     private var fnDown = false, fnDownAt = 0.0, fnAlone = false
@@ -44,6 +45,8 @@ final class Agent: NSObject {
     init(config: Config) { self.config = config; super.init() }
 
     func start() {
+        hotkey = config.effectiveHotkey
+        Log.info("switch key: \(hotkey.description)\(config.hotkey == nil ? " (from the system's 'Select the previous input source' hotkey)" : "")")
         if !AXIsProcessTrusted() {
             Log.warn("not trusted for Accessibility yet; asking macOS to show the prompt")
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -96,7 +99,7 @@ final class Agent: NSObject {
     func triggerOn(_ name: String) -> Bool {
         if disabledTriggers.contains(name) { return false }
         switch name {
-        case "ctrlSpace": return config.triggers.ctrlSpace
+        case "hotkey": return config.triggers.hotkey
         case "globe": return config.triggers.globe
         case "capsLock": return config.triggers.capsLock
         default: return false
@@ -135,9 +138,9 @@ final class Agent: NSObject {
         case .keyDown:
             if fnDown { fnAlone = false }
             let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-            if kc == 49, mods == [.maskControl], triggerOn("ctrlSpace") {
-                if !isRepeat { doSwitch(trigger: "ctrlSpace", at: t) }
-                swallowSpaceUp = true
+            if Int(kc) == hotkey.keyCode, mods.rawValue == hotkey.flags, triggerOn("hotkey") {
+                if !isRepeat { doSwitch(trigger: "hotkey", at: t) }
+                swallowKeyUp = kc
                 return nil                                   // the system hotkey never sees it
             }
             if kc == 79, triggerOn("capsLock") {             // Caps Lock, remapped by us to F18
@@ -148,7 +151,7 @@ final class Agent: NSObject {
             return pass
 
         case .keyUp:
-            if kc == 49, swallowSpaceUp { swallowSpaceUp = false; return nil }
+            if let k = swallowKeyUp, k == kc { swallowKeyUp = nil; return nil }
             if kc == 79, triggerOn("capsLock") { return nil }
             retranslate(event, keyCode: kc, flags: flags, mods: mods, keyDown: false, at: t)
             return pass
@@ -265,8 +268,8 @@ final class Agent: NSObject {
             w.append("Globe key is still handled by macOS too (AppleFnUsageType=\(fnUsage.map(String.init) ?? "default")). Set 'Press 🌐 key to' = Do Nothing, or run scripts/install.sh.")
         }
         if let hk = CFPreferencesCopyAppValue("AppleSymbolicHotKeys" as CFString, "com.apple.symbolichotkeys" as CFString) as? [String: Any],
-           let h60 = hk["60"] as? [String: Any], let en = h60["enabled"] as? Bool, en, triggerOn("ctrlSpace") {
-            w.append("System hotkey 60 (Select previous input source, Ctrl+Space) is still enabled; mgnov swallows the keys first, but disable it to be safe (scripts/install.sh does).")
+           let h60 = hk["60"] as? [String: Any], ((h60["enabled"] as? Bool) ?? true), triggerOn("hotkey"), Hotkey.fromSystem() == hotkey {
+            w.append("macOS still has \(hotkey.description) as 'Select the previous input source' too; mgnov swallows the keys first, but run scripts/install.sh to hand the key over for good.")
         }
         if cycleIDs().count < 2 { w.append("Fewer than two enabled keyboard input sources; nothing to switch between.") }
         return w
@@ -277,7 +280,7 @@ final class Agent: NSObject {
         if on { disabledTriggers.remove(name) }
         switch name {
         case "globe": config.triggers.globe = on
-        case "ctrlSpace": config.triggers.ctrlSpace = on
+        case "hotkey": config.triggers.hotkey = on
         default: break
         }
     }
@@ -290,7 +293,8 @@ final class Agent: NSObject {
             "bundle": Bundle.main.bundleIdentifier ?? "none",
             "trusted": AXIsProcessTrusted(), "tapInstalled": tapInstalled,
             "uptimeSec": Int(Date().timeIntervalSince(startedAt)),
-            "triggers": ["ctrlSpace": triggerOn("ctrlSpace"), "globe": triggerOn("globe"), "capsLock": triggerOn("capsLock")],
+            "triggers": ["hotkey": triggerOn("hotkey"), "globe": triggerOn("globe"), "capsLock": triggerOn("capsLock")],
+            "hotkey": hotkey.description, "hotkeyKeyCode": hotkey.keyCode, "hotkeyFlags": Int(hotkey.flags),
             "config": ["retranslateWindowMs": config.retranslateWindowMs, "watchdogMs": config.watchdogMs, "globeTapWindowMs": config.globeTapWindowMs, "cycle": cycleIDs(), "file": Config.file.path],
             "current": cur,
             "sources": sources.map { ["id": $0.id, "name": $0.name, "layout": $0.isLayout, "current": $0.id == cur] },

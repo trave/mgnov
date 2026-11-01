@@ -23,12 +23,16 @@ cp -R "$APP_SRC" "$APP_DST"
 
 # --- back up and hand over the trigger keys --------------------------------------------
 globe_on=$(python3 -c "import json,sys; c=json.load(open('$CONFIG')) if __import__('os').path.exists('$CONFIG') else {}; print(int(c.get('triggers',{}).get('globe',True)))" 2>/dev/null || echo 1)
-ctrl_on=$(python3 -c "import json,sys; c=json.load(open('$CONFIG')) if __import__('os').path.exists('$CONFIG') else {}; print(int(c.get('triggers',{}).get('ctrlSpace',True)))" 2>/dev/null || echo 1)
+hotkey_on=$(python3 -c "import json,sys; c=json.load(open('$CONFIG')) if __import__('os').path.exists('$CONFIG') else {}; print(int(c.get('triggers',{}).get('hotkey',True)))" 2>/dev/null || echo 1)
+HK=~/Library/Preferences/com.apple.symbolichotkeys.plist
+p0=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:value:parameters:0" "$HK" 2>/dev/null || echo 32)
+p1=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:value:parameters:1" "$HK" 2>/dev/null || echo 49)
+p2=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:value:parameters:2" "$HK" 2>/dev/null || echo 262144)
 
 if [ ! -f "$BACKUP" ]; then
   fn_prev=$(defaults read com.apple.HIToolbox AppleFnUsageType 2>/dev/null || echo "unset")
   hk60_prev=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:enabled" ~/Library/Preferences/com.apple.symbolichotkeys.plist 2>/dev/null || echo "unset")
-  printf '{"AppleFnUsageType": "%s", "hotkey60enabled": "%s"}\n' "$fn_prev" "$hk60_prev" > "$BACKUP"
+  printf '{"AppleFnUsageType": "%s", "hotkey60enabled": "%s", "hotkey60params": [%s, %s, %s]}\n' "$fn_prev" "$hk60_prev" "$p0" "$p1" "$p2" > "$BACKUP"
   echo "→ previous system settings saved to $BACKUP"
 fi
 
@@ -36,9 +40,9 @@ if [ "$globe_on" = "1" ]; then
   echo "→ 'Press 🌐 key to' = Do Nothing (mgnov handles the Globe tap itself)"
   defaults write com.apple.HIToolbox AppleFnUsageType -int 0
 fi
-if [ "$ctrl_on" = "1" ]; then
-  echo "→ disabling system hotkey 60 (Select previous input source, Ctrl+Space)"
-  defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 60 '{ enabled = 0; value = { parameters = (32, 49, 1048576); type = standard; }; }'
+if [ "$hotkey_on" = "1" ]; then
+  echo "→ disabling system hotkey 60 (Select previous input source; parameters $p0,$p1,$p2 kept)"
+  defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 60 "{ enabled = 0; value = { parameters = ($p0, $p1, $p2); type = standard; }; }"
 fi
 /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u 2>/dev/null || true
 

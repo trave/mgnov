@@ -19,24 +19,27 @@ enum Synth {
         post(key(63, down: false, flags: []))
         return (tDown, tUp)
     }
-    static func trigger(_ name: String, holdMs: Int, gapMs: Int, spaceUpFirst: Bool) -> (down: Double, up: Double) {
-        name == "globe" ? globe(holdMs: holdMs) : ctrlSpace(holdMs: holdMs, gapMs: gapMs, spaceUpFirst: spaceUpFirst)
+    static func trigger(_ name: String, hotkey: Hotkey, holdMs: Int, gapMs: Int, spaceUpFirst: Bool) -> (down: Double, up: Double) {
+        name == "globe" ? globe(holdMs: holdMs) : press(hotkey, holdMs: holdMs, gapMs: gapMs, keyUpFirst: spaceUpFirst)
     }
-    /// Press Ctrl+Space. Returns the monotonic times of Space down and Space up.
-    static func ctrlSpace(holdMs: Int, gapMs: Int, spaceUpFirst: Bool) -> (down: Double, up: Double) {
-        post(key(59, down: true, flags: .maskControl)); usleep(10_000)
+    /// Press the hotkey (modifiers, then the key). Returns the monotonic times of the key's down and up.
+    static func press(_ hk: Hotkey, holdMs: Int, gapMs: Int, keyUpFirst: Bool) -> (down: Double, up: Double) {
+        let flags = CGEventFlags(rawValue: hk.flags)
+        let kc = CGKeyCode(hk.keyCode)
+        for m in hk.modifierKeyCodes { post(key(m, down: true, flags: flags)); usleep(5_000) }
+        usleep(5_000)
         let tDown = Clock.now()
-        post(key(49, down: true, flags: .maskControl))
+        post(key(kc, down: true, flags: flags))
         usleep(UInt32(max(holdMs, 1)) * 1000)
         var tUp = 0.0
-        if spaceUpFirst {
-            tUp = Clock.now(); post(key(49, down: false, flags: .maskControl))
+        if keyUpFirst {
+            tUp = Clock.now(); post(key(kc, down: false, flags: flags))
             if gapMs > 0 { usleep(UInt32(gapMs) * 1000) }
-            post(key(59, down: false))
+            for m in hk.modifierKeyCodes.reversed() { post(key(m, down: false)) }
         } else {
-            post(key(59, down: false))
+            for m in hk.modifierKeyCodes.reversed() { post(key(m, down: false)) }
             if gapMs > 0 { usleep(UInt32(gapMs) * 1000) }
-            tUp = Clock.now(); post(key(49, down: false))
+            tUp = Clock.now(); post(key(kc, down: false))
         }
         return (tDown, tUp)
     }
@@ -96,6 +99,7 @@ enum Measure {
         onMain { agent.setTapEnabled(!systemMode); if !systemMode && trigger == "globe" { agent.forceTrigger("globe", true) } }
         defer { onMain { agent.setTapEnabled(true); agent.forceTrigger("globe", globeWas) } }
         let original = currentIDOnMain()
+        let hk = onMain { agent.hotkey }
         let mon = SourceMonitor(); defer { mon.finish() }
         var out: [[String: Any]] = []
         let conds = trigger == "globe" ? [Cond(hold: 40, gap: 0, spaceUpFirst: true), Cond(hold: 80, gap: 0, spaceUpFirst: true), Cond(hold: 150, gap: 0, spaceUpFirst: true), Cond(hold: 300, gap: 0, spaceUpFirst: true)] : conditions
@@ -105,7 +109,7 @@ enum Measure {
             for _ in 0..<trials {
                 mon.reset()
                 let before = currentIDOnMain()
-                let t = Synth.trigger(trigger, holdMs: c.hold, gapMs: c.gap, spaceUpFirst: c.spaceUpFirst)
+                let t = Synth.trigger(trigger, hotkey: hk, holdMs: c.hold, gapMs: c.gap, spaceUpFirst: c.spaceUpFirst)
                 usleep(1_200_000)
                 let ch = mon.snapshot()
                 let after = currentIDOnMain()
@@ -113,12 +117,12 @@ enum Measure {
                 else if after == before { reverted += 1; if ch.count >= 2 { revertAfter.append((ch[1].0 - ch[0].0) * 1000) } }
                 else { persisted += 1; latDown.append((ch[0].0 - t.down) * 1000); latUp.append((ch[0].0 - t.up) * 1000) }
             }
-            out.append(["holdMs": c.hold, "releaseGapMs": c.gap, "releaseOrder": c.spaceUpFirst ? "space-up first" : "ctrl-up first",
+            out.append(["holdMs": c.hold, "releaseGapMs": c.gap, "releaseOrder": c.spaceUpFirst ? "key-up first" : "modifier-up first",
                         "trials": trials, "persisted": persisted, "reverted": reverted, "noResponse": none,
                         "latencyFromKeyDownMs": agg(latDown), "latencyFromKeyUpMs": agg(latUp), "revertAfterMs": agg(revertAfter)])
         }
         restoreSource(original)
-        return ["mode": mode, "trigger": trigger, "trials": trials, "startSource": original, "conditions": out,
+        return ["mode": mode, "trigger": trigger == "globe" ? "globe" : hk.description, "trials": trials, "startSource": original, "conditions": out,
                 "handledBy": systemMode ? "macOS hotkey (mgnov tap suspended)" : "mgnov"]
     }
 }
@@ -159,6 +163,7 @@ enum SelfTest {
         onMain { agent.setTapEnabled(!systemMode); if !systemMode && trigger == "globe" { agent.forceTrigger("globe", true) } }
         defer { onMain { agent.setTapEnabled(true); agent.forceTrigger("globe", globeWas) } }
         let original = currentIDOnMain()
+        let hk = onMain { agent.hotkey }
         let win = onMain { SelfTestWindow() }
         onMain { win.show() }
         usleep(600_000)
@@ -182,7 +187,7 @@ enum SelfTest {
                       let tr = KeyTranslator(target.tis) else { return nil }
                 return keys.compactMap { tr.translate(keyCode: UInt16($0), flags: [], keyDown: true) }.joined()
             }) else { continue }
-            _ = Synth.trigger(trigger, holdMs: 40, gapMs: 0, spaceUpFirst: true)
+            _ = Synth.trigger(trigger, hotkey: hk, holdMs: 40, gapMs: 0, spaceUpFirst: true)
             if typeGapMs > 0 { usleep(UInt32(typeGapMs) * 1000) }
             for k in keys {
                 Synth.post(Synth.key(k, down: true)); usleep(6_000)
@@ -199,7 +204,7 @@ enum SelfTest {
         }
         onMain { win.close() }
         restoreSource(original)
-        return ["mode": mode, "trigger": trigger, "trials": trials, "typeGapMs": typeGapMs, "wrongChars": wrongTotal, "chars": charsTotal,
+        return ["mode": mode, "trigger": trigger == "globe" ? "globe" : hk.description, "trials": trials, "typeGapMs": typeGapMs, "wrongChars": wrongTotal, "chars": charsTotal,
                 "noSwitch": noSwitch, "results": results, "handledBy": systemMode ? "macOS hotkey (mgnov tap suspended)" : "mgnov"]
     }
 }

@@ -16,9 +16,10 @@ rm -rf "$APP_DST"
 if [ -f "$BACKUP" ]; then
   fn_prev=$(python3 -c "import json; print(json.load(open('$BACKUP'))['AppleFnUsageType'])")
   hk_prev=$(python3 -c "import json; print(json.load(open('$BACKUP'))['hotkey60enabled'])")
+  hk_params=$(python3 -c "import json; print(', '.join(str(x) for x in json.load(open('$BACKUP')).get('hotkey60params',[32,49,262144])))")
   if [ "$fn_prev" = "unset" ]; then defaults delete com.apple.HIToolbox AppleFnUsageType 2>/dev/null || true; else defaults write com.apple.HIToolbox AppleFnUsageType -int "$fn_prev"; fi
   if [ "$hk_prev" != "false" ]; then
-    defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 60 '{ enabled = 1; value = { parameters = (32, 49, 1048576); type = standard; }; }'
+    defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 60 "{ enabled = 1; value = { parameters = ($hk_params); type = standard; }; }"
   fi
   /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u 2>/dev/null || true
   rm -f "$BACKUP"

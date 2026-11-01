@@ -8,10 +8,10 @@ mgnov \(mgnovVersion) — instant, race-free keyboard layout switching for macOS
   mgnov stats [--last N]           switch latency stats and recent switches
   mgnov sources                    enabled keyboard input sources
   mgnov switch [ID]                switch to the next source (or to ID)
-  mgnov enable|disable TRIGGER     TRIGGER = ctrlSpace | globe | capsLock  (saved to config)
-  mgnov measure [--mode system|mgnov] [--trigger ctrlSpace|globe] [--trials N]
-                                   timing experiment with synthetic key presses (default: mgnov, ctrlSpace, 5)
-  mgnov selftest [--mode system|mgnov] [--trigger ctrlSpace|globe] [--trials N] [--gap MS]
+  mgnov enable|disable TRIGGER     TRIGGER = hotkey | globe | capsLock  (saved to config)
+  mgnov measure [--mode system|mgnov] [--trigger hotkey|globe] [--trials N]
+                                   timing experiment with synthetic key presses (default: mgnov, hotkey, 5)
+  mgnov selftest [--mode system|mgnov] [--trigger hotkey|globe] [--trials N] [--gap MS]
                                    type right after a switch into a real text view; count wrong letters
   mgnov log [--last N]             recent agent log lines
   mgnov config                     print the config file path
@@ -99,6 +99,7 @@ func request(_ req: [String: Any]) -> [String: Any] {
 func printStatus(_ s: [String: Any]) {
     print("mgnov \(s["version"] ?? "") pid \(s["pid"] ?? "") bundle \(s["bundle"] ?? "")  uptime \(s["uptimeSec"] ?? 0)s")
     print("accessibility trusted: \(s["trusted"] ?? false)   event tap: \(s["tapInstalled"] ?? false)")
+    print("switch key: \(s["hotkey"] ?? "?")")
     if let t = s["triggers"] as? [String: Bool] { print("triggers: " + t.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value ? "on" : "off")" }.joined(separator: "  ")) }
     if let c = s["config"] as? [String: Any] { print("window: retranslate \(c["retranslateWindowMs"] ?? "")ms, watchdog \(c["watchdogMs"] ?? "")ms, globe tap \(c["globeTapWindowMs"] ?? "")ms   config: \(c["file"] ?? "")") }
     if let src = s["sources"] as? [[String: Any]] {
@@ -145,13 +146,13 @@ case "switch":
     var req: [String: Any] = ["cmd": "switch"]; if let id = positional() { req["id"] = id }
     print("current: \(request(req)["current"] ?? "")")
 case "enable", "disable":
-    guard let t = positional() else { print("trigger name required: ctrlSpace | globe | capsLock"); exit(1) }
+    guard let t = positional() else { print("trigger name required: hotkey | globe | capsLock"); exit(1) }
     print(pretty(request(["cmd": "set", "trigger": t, "enabled": cmd == "enable"])))
 case "measure":
-    let r = request(["cmd": "measure", "mode": opt("--mode", "mgnov"), "trigger": opt("--trigger", "ctrlSpace"), "trials": optInt("--trials", 5)])
+    let r = request(["cmd": "measure", "mode": opt("--mode", "mgnov"), "trigger": opt("--trigger", "hotkey"), "trials": optInt("--trials", 5)])
     printMeasure(r); saveReport("measure", r)
 case "selftest":
-    let r = request(["cmd": "selftest", "mode": opt("--mode", "mgnov"), "trigger": opt("--trigger", "ctrlSpace"), "trials": optInt("--trials", 10), "gap": optInt("--gap", 0)])
+    let r = request(["cmd": "selftest", "mode": opt("--mode", "mgnov"), "trigger": opt("--trigger", "hotkey"), "trials": optInt("--trials", 10), "gap": optInt("--gap", 0)])
     printSelfTest(r); saveReport("selftest", r)
 case "log": (request(["cmd": "log", "last": optInt("--last", 50)])["lines"] as? [String] ?? []).forEach { print($0) }
 case "quit": _ = request(["cmd": "quit"]); print("agent asked to quit")
