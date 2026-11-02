@@ -9,6 +9,8 @@ mgnov \(mgnovVersion) — instant, race-free keyboard layout switching for macOS
   mgnov sources                    enabled keyboard input sources
   mgnov switch [ID]                switch to the next source (or to ID)
   mgnov enable|disable TRIGGER     TRIGGER = hotkey | globe | capsLock  (saved to config)
+  mgnov hotkey [KEYS|system]       show or set the switch key(s): "⌃⌥Space", "cmd+space", "ctrl+shift+f1",
+                                   several separated by commas; "system" = follow macOS's input-source hotkeys
   mgnov measure [--mode system|mgnov] [--trigger hotkey|globe] [--trials N]
                                    timing experiment with synthetic key presses (default: mgnov, hotkey, 5)
   mgnov selftest [--mode system|mgnov] [--trigger hotkey|globe] [--trials N] [--gap MS]
@@ -99,7 +101,10 @@ func request(_ req: [String: Any]) -> [String: Any] {
 func printStatus(_ s: [String: Any]) {
     print("mgnov \(s["version"] ?? "") pid \(s["pid"] ?? "") bundle \(s["bundle"] ?? "")  uptime \(s["uptimeSec"] ?? 0)s")
     print("accessibility trusted: \(s["trusted"] ?? false)   event tap: \(s["tapInstalled"] ?? false)")
-    print("switch key: \(s["hotkey"] ?? "?")")
+    print("switch keys: \(s["hotkey"] ?? "?")  (\(s["hotkeySource"] ?? "?"))")
+    if let sh = s["systemHotkeys"] as? [[String: Any]] {
+        print("macOS input-source hotkeys: " + sh.map { "\($0["key"] ?? "") \(($0["enabled"] as? Bool) == true ? "on" : "off")" }.joined(separator: ", "))
+    }
     if let t = s["triggers"] as? [String: Bool] { print("triggers: " + t.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value ? "on" : "off")" }.joined(separator: "  ")) }
     if let c = s["config"] as? [String: Any] { print("window: retranslate \(c["retranslateWindowMs"] ?? "")ms, watchdog \(c["watchdogMs"] ?? "")ms, globe tap \(c["globeTapWindowMs"] ?? "")ms   config: \(c["file"] ?? "")") }
     if let src = s["sources"] as? [[String: Any]] {
@@ -165,6 +170,9 @@ case "switch":
 case "enable", "disable":
     guard let t = positional() else { print("trigger name required: hotkey | globe | capsLock"); exit(1) }
     print(pretty(request(["cmd": "set", "trigger": t, "enabled": cmd == "enable"])))
+case "hotkey":
+    if let v = positional() { print(pretty(request(["cmd": "hotkey", "value": v]))) }
+    else { let s = request(["cmd": "status"]); print("switch keys: \(s["hotkey"] ?? "?")  (\(s["hotkeySource"] ?? "?"))") }
 case "measure":
     let r = request(["cmd": "measure", "mode": opt("--mode", "mgnov"), "trigger": opt("--trigger", "hotkey"), "trials": optInt("--trials", 5)])
     printMeasure(r); saveReport("measure", r)

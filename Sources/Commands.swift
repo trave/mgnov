@@ -34,6 +34,24 @@ enum Commands {
                 return ["triggers": ["hotkey": agent.triggerOn("hotkey"), "globe": agent.triggerOn("globe"), "capsLock": agent.triggerOn("capsLock")],
                         "note": name == "capsLock" ? "restart the agent to apply the Caps Lock remap" : ""]
             }
+        case "hotkey":
+            let value = str("value", "").trimmingCharacters(in: .whitespaces)
+            return onMain {
+                if value.lowercased() == "system" {
+                    agent.config.hotkeys = []
+                } else {
+                    var hks: [Hotkey] = []
+                    for part in value.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) {
+                        guard let h = Hotkey.parse(part) else { return ["ok": false, "error": "cannot parse \"\(part)\"; examples: ⌃⌥Space, cmd+space, ctrl+shift+f1, system"] }
+                        hks.append(h)
+                    }
+                    if hks.isEmpty { return ["ok": false, "error": "no key given"] }
+                    agent.config.hotkeys = hks
+                }
+                agent.config.save()
+                agent.applyHotkeys()
+                return ["hotkey": agent.hotkeys.map { $0.description }.joined(separator: ", "), "source": agent.config.hotkeys.isEmpty ? "system" : "config"]
+            }
         case "quit":
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { agent.shutdown(); exit(0) }
             return ["bye": true]

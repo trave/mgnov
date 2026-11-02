@@ -23,19 +23,25 @@ rm -rf "$APP_DST"
 cp -R "$APP_SRC" "$APP_DST"
 
 # --- back up and hand over the trigger keys --------------------------------------------
-globe_on=$(python3 -c "import json,sys; c=json.load(open('$CONFIG')) if __import__('os').path.exists('$CONFIG') else {}; print(int(c.get('triggers',{}).get('globe',True)))" 2>/dev/null || echo 1)
+globe_on=$(python3 -c "import json,sys; c=json.load(open('$CONFIG')) if __import__('os').path.exists('$CONFIG') else {}; print(int(c.get('triggers',{}).get('globe',False)))" 2>/dev/null || echo 0)
 hotkey_on=$(python3 -c "import json,sys; c=json.load(open('$CONFIG')) if __import__('os').path.exists('$CONFIG') else {}; print(int(c.get('triggers',{}).get('hotkey',True)))" 2>/dev/null || echo 1)
 HK=~/Library/Preferences/com.apple.symbolichotkeys.plist
-p0=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:value:parameters:0" "$HK" 2>/dev/null || echo 32)
-p1=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:value:parameters:1" "$HK" 2>/dev/null || echo 49)
-p2=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:value:parameters:2" "$HK" 2>/dev/null || echo 262144)
+# macOS has two input-source hotkeys: 60 "Select the previous input source" (default ⌃Space) and
+# 61 "Select next source in Input menu" (default ⌃⌥Space). mgnov handles every enabled one.
+hk_get() { /usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:$1:$2" "$HK" 2>/dev/null || echo "$3"; }
+hk_def() { case "$1:$2" in 60:2) echo 262144;; 61:2) echo 786432;; *:0) echo 32;; *:1) echo 49;; esac; }  # factory parameters
 
 if [ "$KEEP_KEYS" = "1" ]; then
   echo "→ system key settings left untouched (--keep-system-keys)"
 elif [ ! -f "$BACKUP" ]; then
   fn_prev=$(defaults read com.apple.HIToolbox AppleFnUsageType 2>/dev/null || echo "unset")
-  hk60_prev=$(/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:enabled" ~/Library/Preferences/com.apple.symbolichotkeys.plist 2>/dev/null || echo "unset")
-  printf '{"AppleFnUsageType": "%s", "hotkey60enabled": "%s", "hotkey60params": [%s, %s, %s]}\n' "$fn_prev" "$hk60_prev" "$p0" "$p1" "$p2" > "$BACKUP"
+  json="{\"AppleFnUsageType\": \"$fn_prev\""
+  for id in 60 61; do
+    en=$(hk_get $id enabled unset)
+    p0=$(hk_get $id value:parameters:0 $(hk_def $id 0)); p1=$(hk_get $id value:parameters:1 $(hk_def $id 1)); p2=$(hk_get $id value:parameters:2 $(hk_def $id 2))
+    json="$json, \"hotkey${id}enabled\": \"$en\", \"hotkey${id}params\": [$p0, $p1, $p2]"
+  done
+  echo "$json}" > "$BACKUP"
   echo "→ previous system settings saved to $BACKUP"
 fi
 
@@ -44,8 +50,12 @@ if [ "$KEEP_KEYS" = "0" ] && [ "$globe_on" = "1" ]; then
   defaults write com.apple.HIToolbox AppleFnUsageType -int 0
 fi
 if [ "$KEEP_KEYS" = "0" ] && [ "$hotkey_on" = "1" ]; then
-  echo "→ disabling system hotkey 60 (Select previous input source; parameters $p0,$p1,$p2 kept)"
-  defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 60 "{ enabled = 0; value = { parameters = ($p0, $p1, $p2); type = standard; }; }"
+  for id in 60 61; do
+    [ "$(hk_get $id enabled true)" = "false" ] && continue
+    p0=$(hk_get $id value:parameters:0 $(hk_def $id 0)); p1=$(hk_get $id value:parameters:1 $(hk_def $id 1)); p2=$(hk_get $id value:parameters:2 $(hk_def $id 2))
+    echo "→ disabling system hotkey $id (parameters $p0,$p1,$p2 kept; mgnov handles the key now)"
+    defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add $id "{ enabled = 0; value = { parameters = ($p0, $p1, $p2); type = standard; }; }"
+  done
 fi
 /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u 2>/dev/null || true
 

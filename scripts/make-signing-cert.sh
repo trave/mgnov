@@ -28,6 +28,11 @@ KC="$HOME/Library/Keychains/login.keychain-db"
 security import "$T/id.p12" -k "$KC" -P mgnov -T /usr/bin/codesign -T /usr/bin/security
 echo "→ trusting '$NAME' for code signing (macOS may ask for your password)"
 security add-trusted-cert -p codeSign -k "$KC" "$T/cert.pem"
-# let codesign use the key without a prompt on every build
-security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KC" >/dev/null 2>&1 || true
+# Let codesign use the key without a GUI prompt on every build. This needs the login keychain
+# password; `security` asks for it in the terminal (nothing is stored).
+echo "→ allowing codesign to use the key (enter your login password when asked, in this terminal)"
+if ! security set-key-partition-list -S apple-tool:,apple:,codesign: -s "$KC" >/dev/null; then
+  echo "   could not set the key partition list. Run it yourself later:"
+  echo "   security set-key-partition-list -S apple-tool:,apple:,codesign: -s ~/Library/Keychains/login.keychain-db"
+fi
 echo "→ done. Rebuild with: make"

@@ -83,7 +83,7 @@ func restoreSource(_ id: String) {
 }
 
 /// Reproduces the FB24297598 experiment: Ctrl+Space with various hold times and release timings.
-/// mode "system": mgnov's Ctrl+Space trigger is turned off so the macOS hotkey handles the keys.
+/// mode "system": mgnov's hotkey trigger is turned off so the macOS hotkey handles the keys.
 /// mode "mgnov": mgnov handles them.
 enum Measure {
     struct Cond { let hold: Int; let gap: Int; let spaceUpFirst: Bool }

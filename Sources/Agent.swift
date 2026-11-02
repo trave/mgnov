@@ -36,7 +36,9 @@ final class Agent: NSObject {
     private var watchdogUntil = 0.0
     private var watchdogFired = false
     private var swallowKeyUp: UInt16? = nil
-    private(set) var hotkey = Hotkey.ctrlSpace
+    private(set) var hotkeys: [Hotkey] = [.ctrlSpace]
+    /// The first switch key (for synthetic presses in measurements).
+    var hotkey: Hotkey { hotkeys[0] }
 
     // Globe (fn) tap detection
     private var fnDown = false, fnDownAt = 0.0, fnAlone = false
@@ -49,8 +51,7 @@ final class Agent: NSObject {
     init(config: Config) { self.config = config; super.init() }
 
     func start() {
-        hotkey = config.effectiveHotkey
-        Log.info("switch key: \(hotkey.description)\(config.hotkey == nil ? " (from the system's 'Select the previous input source' hotkey)" : "")")
+        applyHotkeys()
         if !AXIsProcessTrusted() {
             Log.warn("not trusted for Accessibility yet; asking macOS to show the prompt")
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -142,7 +143,7 @@ final class Agent: NSObject {
         case .keyDown:
             if fnDown { fnAlone = false }
             let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-            if Int(kc) == hotkey.keyCode, mods.rawValue == hotkey.flags, triggerOn("hotkey") {
+            if triggerOn("hotkey"), hotkeys.contains(where: { Int(kc) == $0.keyCode && mods.rawValue == $0.flags }) {
                 if !isRepeat { doSwitch(trigger: "hotkey", at: t) }
                 swallowKeyUp = kc
                 return nil                                   // the system hotkey never sees it
@@ -284,12 +285,19 @@ final class Agent: NSObject {
         if triggerOn("globe"), fnUsage != 0 {
             w.append("Globe key is still handled by macOS too (AppleFnUsageType=\(fnUsage.map(String.init) ?? "default")). Set 'Press 🌐 key to' = Do Nothing, or run scripts/install.sh.")
         }
-        if let hk = CFPreferencesCopyAppValue("AppleSymbolicHotKeys" as CFString, "com.apple.symbolichotkeys" as CFString) as? [String: Any],
-           let h60 = hk["60"] as? [String: Any], ((h60["enabled"] as? Bool) ?? true), triggerOn("hotkey"), Hotkey.fromSystem() == hotkey {
-            w.append("macOS still has \(hotkey.description) as 'Select the previous input source' too; mgnov swallows the keys first, but run scripts/install.sh to hand the key over for good.")
+        if triggerOn("hotkey") {
+            for s in Hotkey.systemHotkeys() where s.enabled && hotkeys.contains(s.hotkey) {
+                w.append("macOS still has \(s.hotkey.description) as '\(s.name)' too; mgnov swallows the keys first, but run scripts/install.sh to hand the key over for good.")
+            }
         }
         if cycleIDs().count < 2 { w.append("Fewer than two enabled keyboard input sources; nothing to switch between.") }
         return w
+    }
+
+    /// Re-read the switch keys from the config (or the system hotkeys) and log them.
+    func applyHotkeys() {
+        hotkeys = config.effectiveHotkeys
+        Log.info("switch keys: \(hotkeys.map { $0.description }.joined(separator: ", "))\(config.hotkeys.isEmpty ? " (from the system's input-source hotkeys)" : " (from config)")")
     }
 
     /// Measurement helper: force a trigger on for the duration of a run.
@@ -311,7 +319,10 @@ final class Agent: NSObject {
             "trusted": AXIsProcessTrusted(), "tapInstalled": tapInstalled,
             "uptimeSec": Int(Date().timeIntervalSince(startedAt)),
             "triggers": ["hotkey": triggerOn("hotkey"), "globe": triggerOn("globe"), "capsLock": triggerOn("capsLock")],
-            "hotkey": hotkey.description, "hotkeyKeyCode": hotkey.keyCode, "hotkeyFlags": Int(hotkey.flags),
+            "hotkey": hotkeys.map { $0.description }.joined(separator: ", "),
+            "hotkeys": hotkeys.map { ["key": $0.description, "keyCode": $0.keyCode, "flags": Int($0.flags)] },
+            "hotkeySource": config.hotkeys.isEmpty ? "system" : "config",
+            "systemHotkeys": Hotkey.systemHotkeys().map { ["id": $0.id, "name": $0.name, "key": $0.hotkey.description, "enabled": $0.enabled] },
             "config": ["retranslateWindowMs": config.retranslateWindowMs, "watchdogMs": config.watchdogMs, "globeTapWindowMs": config.globeTapWindowMs, "cycle": cycleIDs(), "file": Config.file.path],
             "current": cur,
             "sources": sources.map { ["id": $0.id, "name": $0.name, "layout": $0.isLayout, "current": $0.id == cur] },

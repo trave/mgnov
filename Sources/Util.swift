@@ -1,6 +1,6 @@
 import Foundation
 
-let mgnovVersion = "0.1.0"
+let mgnovVersion = "0.2.0"
 
 enum Clock {
     /// Monotonic seconds.
