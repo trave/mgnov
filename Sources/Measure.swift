@@ -19,8 +19,8 @@ enum Synth {
         post(key(63, down: false, flags: []))
         return (tDown, tUp)
     }
-    static func trigger(_ name: String, hotkey: Hotkey, holdMs: Int, gapMs: Int, spaceUpFirst: Bool) -> (down: Double, up: Double) {
-        name == "globe" ? globe(holdMs: holdMs) : press(hotkey, holdMs: holdMs, gapMs: gapMs, keyUpFirst: spaceUpFirst)
+    static func trigger(_ name: String, hotkey: Hotkey, holdMs: Int, gapMs: Int, keyUpFirst: Bool) -> (down: Double, up: Double) {
+        name == "globe" ? globe(holdMs: holdMs) : press(hotkey, holdMs: holdMs, gapMs: gapMs, keyUpFirst: keyUpFirst)
     }
     /// Press the hotkey (modifiers, then the key). Returns the monotonic times of the key's down and up.
     static func press(_ hk: Hotkey, holdMs: Int, gapMs: Int, keyUpFirst: Bool) -> (down: Double, up: Double) {
@@ -82,16 +82,18 @@ func restoreSource(_ id: String) {
     onMain { if InputSources.currentID() != id, let s = InputSources.find(id) { InputSources.select(s) } }
 }
 
-/// Reproduces the FB24297598 experiment: Ctrl+Space with various hold times and release timings.
+/// Reproduces the FB24297598 experiment: the hotkey with various hold times and release timings.
 /// mode "system": mgnov's hotkey trigger is turned off so the macOS hotkey handles the keys.
 /// mode "mgnov": mgnov handles them.
 enum Measure {
-    struct Cond { let hold: Int; let gap: Int; let spaceUpFirst: Bool }
+    struct Cond { let hold: Int; let gap: Int; let keyUpFirst: Bool }
     static let conditions = [
-        Cond(hold: 40, gap: 0, spaceUpFirst: true), Cond(hold: 80, gap: 0, spaceUpFirst: true),
-        Cond(hold: 150, gap: 0, spaceUpFirst: true), Cond(hold: 300, gap: 0, spaceUpFirst: true),
-        Cond(hold: 80, gap: 30, spaceUpFirst: true), Cond(hold: 80, gap: 30, spaceUpFirst: false),
+        Cond(hold: 40, gap: 0, keyUpFirst: true), Cond(hold: 80, gap: 0, keyUpFirst: true),
+        Cond(hold: 150, gap: 0, keyUpFirst: true), Cond(hold: 300, gap: 0, keyUpFirst: true),
+        Cond(hold: 80, gap: 30, keyUpFirst: true), Cond(hold: 80, gap: 30, keyUpFirst: false),
     ]
+    static let globeConditions = [Cond(hold: 40, gap: 0, keyUpFirst: true), Cond(hold: 80, gap: 0, keyUpFirst: true),
+                                  Cond(hold: 150, gap: 0, keyUpFirst: true), Cond(hold: 300, gap: 0, keyUpFirst: true)]
 
     static func run(agent: Agent, mode: String, trigger: String, trials: Int) -> [String: Any] {
         let systemMode = mode == "system"
@@ -102,14 +104,14 @@ enum Measure {
         let hk = onMain { agent.hotkey }
         let mon = SourceMonitor(); defer { mon.finish() }
         var out: [[String: Any]] = []
-        let conds = trigger == "globe" ? [Cond(hold: 40, gap: 0, spaceUpFirst: true), Cond(hold: 80, gap: 0, spaceUpFirst: true), Cond(hold: 150, gap: 0, spaceUpFirst: true), Cond(hold: 300, gap: 0, spaceUpFirst: true)] : conditions
+        let conds = trigger == "globe" ? globeConditions : conditions
         for c in conds {
             var persisted = 0, reverted = 0, none = 0
             var latDown: [Double] = [], latUp: [Double] = [], revertAfter: [Double] = []
             for _ in 0..<trials {
                 mon.reset()
                 let before = currentIDOnMain()
-                let t = Synth.trigger(trigger, hotkey: hk, holdMs: c.hold, gapMs: c.gap, spaceUpFirst: c.spaceUpFirst)
+                let t = Synth.trigger(trigger, hotkey: hk, holdMs: c.hold, gapMs: c.gap, keyUpFirst: c.keyUpFirst)
                 usleep(1_200_000)
                 let ch = mon.snapshot()
                 let after = currentIDOnMain()
@@ -117,7 +119,7 @@ enum Measure {
                 else if after == before { reverted += 1; if ch.count >= 2 { revertAfter.append((ch[1].0 - ch[0].0) * 1000) } }
                 else { persisted += 1; latDown.append((ch[0].0 - t.down) * 1000); latUp.append((ch[0].0 - t.up) * 1000) }
             }
-            out.append(["holdMs": c.hold, "releaseGapMs": c.gap, "releaseOrder": c.spaceUpFirst ? "key-up first" : "modifier-up first",
+            out.append(["holdMs": c.hold, "releaseGapMs": c.gap, "releaseOrder": c.keyUpFirst ? "key-up first" : "modifier-up first",
                         "trials": trials, "persisted": persisted, "reverted": reverted, "noResponse": none,
                         "latencyFromKeyDownMs": agg(latDown), "latencyFromKeyUpMs": agg(latUp), "revertAfterMs": agg(revertAfter)])
         }
@@ -187,7 +189,7 @@ enum SelfTest {
                       let tr = KeyTranslator(target.tis) else { return nil }
                 return keys.compactMap { tr.translate(keyCode: UInt16($0), flags: [], keyDown: true) }.joined()
             }) else { continue }
-            _ = Synth.trigger(trigger, hotkey: hk, holdMs: 40, gapMs: 0, spaceUpFirst: true)
+            _ = Synth.trigger(trigger, hotkey: hk, holdMs: 40, gapMs: 0, keyUpFirst: true)
             if typeGapMs > 0 { usleep(UInt32(typeGapMs) * 1000) }
             for k in keys {
                 Synth.post(Synth.key(k, down: true)); usleep(6_000)

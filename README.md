@@ -19,11 +19,11 @@ mgnov is a small resident agent that:
 - is kept alive by launchd, so there is never a cold start;
 - records every switch (latency, the app in front, slow cases) for `mgnov stats`.
 
-**Status: beta.** Tested on one Mac (Apple Silicon, macOS 26.5) with two layouts.
-Requirements: macOS 14+, Xcode Command Line Tools (`xcode-select --install`). Keyboard layouts
+Measured over 48 hours of daily use (586 switches, 0 lost, 0 reverted, 951 keystrokes rescued;
+numbers in the doc). Tested on Apple Silicon with macOS 26.5 and two layouts. Requirements: macOS 14+, Xcode Command Line Tools (`xcode-select --install`). Keyboard layouts
 (ABC, Russian, …) are the target; CJK input methods are switched but not re-translated.
 
-## Beta testers: setup in 5 minutes
+## Setup in 5 minutes
 
 Nothing here needs `sudo`. Only `Mgnov.app` gets Accessibility; the CLI and your terminal get no
 permissions.
@@ -54,7 +54,7 @@ installs its event tap within 2 s of being trusted.
 With `--keep-system-keys` macOS still has your shortcut too, but mgnov sits ahead of it in the
 event chain and swallows the keys, so macOS never sees them. `make install` without the flag
 also hands the keys over for good (disables the system input-source hotkeys and sets *Press 🌐
-key to* = Do Nothing, with a backup that `make uninstall` restores). Not needed for the beta.
+key to* = Do Nothing, with a backup that `make uninstall` restores). Optional.
 
 **3. Check.**
 
@@ -93,7 +93,7 @@ letters, digits, punctuation. The setting lives in `config.json` as `"hotkey": "
 
 Not supported yet: switching with **Caps Lock** through the system option *Use Caps Lock to switch
 to and from ABC* (mgnov has its own Caps Lock trigger, off by default, that remaps the key with
-`hidutil`: `mgnov enable capsLock`, then restart the agent), and the **🌐 Globe** key unless you
+`hidutil`: `mgnov enable capsLock`), and the **🌐 Globe** key unless you
 hand it over with the full `make install` (then `mgnov enable globe`).
 
 With three or more layouts mgnov cycles through all of them in system order, while macOS's
@@ -108,6 +108,10 @@ build/mgnov status
 ```
 
 Only one agent at a time: `make run` stops the installed one, `make install` stops the dev one.
+`make test` runs the unit tests (hotkey parsing, config decoding); they need no permissions.
+
+Logs: `~/Library/Application Support/mgnov/mgnov.log`, rotated at 5 MB on the next start (one old
+file kept). `mgnov stats` keeps the last 5000 switches in memory; the counters cover the whole run.
 
 ### Measurements
 

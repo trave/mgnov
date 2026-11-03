@@ -5,12 +5,13 @@ SRCS     := $(wildcard Sources/*.swift)
 SWIFTC   ?= swiftc
 # Sign with a stable identity when one exists so TCC grants survive rebuilds (see `make cert`).
 # (the SHA-1 hash, not the name: the name can match twice after the certificate is trusted)
+VERSION  := $(shell sed -n 's/^let mgnovVersion = "\(.*\)"/\1/p' Sources/Util.swift)
 SIGN_ID  ?= $(shell security find-identity -v -p codesigning 2>/dev/null | grep '"mgnov-dev"' | head -1 | awk '{print $$2}')
 ifeq ($(SIGN_ID),)
 SIGN_ID  := -
 endif
 
-.PHONY: all build sign run stop install uninstall cert clean
+.PHONY: all build sign run stop install uninstall cert test clean
 
 all: build
 build: $(BIN)
@@ -18,7 +19,7 @@ build: $(BIN)
 $(BIN): $(SRCS) Resources/Info.plist Makefile
 	@mkdir -p $(APP)/Contents/MacOS
 	$(SWIFTC) -O -swift-version 5 -framework Cocoa -framework Carbon -o $(BIN) $(SRCS)
-	@cp Resources/Info.plist $(APP)/Contents/Info.plist
+	@sed 's/__VERSION__/$(VERSION)/' Resources/Info.plist > $(APP)/Contents/Info.plist
 	@codesign --force --sign "$(SIGN_ID)" --identifier dev.trave.mgnov $(APP)
 	@ln -sf Mgnov.app/Contents/MacOS/mgnov build/mgnov
 	@if [ "$(SIGN_ID)" = "-" ]; then echo "note: ad-hoc signed. macOS forgets the Accessibility grant on every rebuild; run 'make cert' once to fix that."; fi
@@ -45,6 +46,12 @@ uninstall:
 
 cert:
 	scripts/make-signing-cert.sh
+
+# Unit tests (hotkey parsing, config decoding). No permissions or running agent needed.
+test:
+	@mkdir -p build/test
+	$(SWIFTC) -swift-version 5 -framework Cocoa -o build/test/mgnov-tests Sources/Config.swift Sources/Util.swift Tests/main.swift
+	@build/test/mgnov-tests
 
 clean:
 	rm -rf build

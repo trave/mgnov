@@ -89,7 +89,9 @@ struct Hotkey: Codable, Equatable, Hashable {
         (f & ctrl != 0 ? "⌃" : "") + (f & opt != 0 ? "⌥" : "") + (f & shift != 0 ? "⇧" : "") + (f & cmd != 0 ? "⌘" : "")
     }
     var description: String {
-        Hotkey.describeFlags(flags) + (Hotkey.keyNames[keyCode].map { $0.count == 1 ? $0.uppercased() : $0 } ?? "key\(keyCode)")
+        let name = Hotkey.keyNames[keyCode] ?? "key\(keyCode)"
+        let pretty = name.count == 1 || (name.hasPrefix("f") && Int(name.dropFirst()) != nil) ? name.uppercased() : name
+        return Hotkey.describeFlags(flags) + pretty
     }
     /// Key codes of the modifier keys that make up `flags` (for synthetic presses).
     var modifierKeyCodes: [CGKeyCode] {

@@ -17,6 +17,7 @@ mgnov \(mgnovVersion) — instant, race-free keyboard layout switching for macOS
                                    type right after a switch into a real text view; count wrong letters
   mgnov log [--last N]             recent agent log lines
   mgnov config                     print the config file path
+  mgnov version                    print the version
   mgnov quit                       stop the agent
 
 The CLI needs no permissions: it talks to the agent over a local socket.
@@ -147,7 +148,7 @@ case "stats":
     let r = request(["cmd": "stats", "last": optInt("--last", 15)])
     func f(_ x: Any?) -> String { String(format: "%.1f", (x as? NSNumber)?.doubleValue ?? 0) }
     let n = r["notifyMs"] as? [String: Any] ?? [:], s = r["selectMs"] as? [String: Any] ?? [:]
-    print("uptime \(r["uptimeSec"] ?? 0)s   switches \(r["switches"] ?? 0)   protected keys \(r["protectedKeys"] ?? 0)   reverts caught \(r["revertsCaught"] ?? 0)   slow (>\(Int(slowMs)) ms) \(r["slowSwitches"] ?? 0)   no notification \(r["noNotify"] ?? 0)")
+    print("uptime \(r["uptimeSec"] ?? 0)s   switches \(r["switches"] ?? 0) (\(r["recorded"] ?? 0) recorded)   protected keys \(r["protectedKeys"] ?? 0)   reverts caught \(r["revertsCaught"] ?? 0)   slow (>\(Int(slowMs)) ms) \(r["slowSwitches"] ?? 0)   no notification \(r["noNotify"] ?? 0)")
     print("select: median \(f(s["median"])) p95 \(f(s["p95"])) max \(f(s["max"])) ms    notification after key: median \(f(n["median"])) p95 \(f(n["p95"])) max \(f(n["max"])) ms")
     if let apps = r["byApp"] as? [String: [String: Any]], !apps.isEmpty {
         print(pad("app", 36) + " " + pad("switches", 9) + pad("slow", 6) + pad("none", 6) + pad("reverts", 9) + pad("notify med", 11) + "notify max")

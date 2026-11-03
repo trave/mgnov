@@ -14,7 +14,10 @@ struct SwitchRecord: Codable {
     var slow: Bool            // notification later than slowMs, or never
 }
 
+/// A switch whose system-wide notification arrives later than this is reported as SLOW.
 let slowMs = 250.0
+/// Detailed records kept in memory for `mgnov stats` (the counters are for the whole run).
+let maxRecords = 5000
 
 /// The resident part: an active session event tap that switches on the trigger key itself,
 /// re-translates keystrokes that race the switch, and re-applies a switch the system reverts.
@@ -23,8 +26,6 @@ final class Agent: NSObject {
     private var tap: CFMachPort?
     private(set) var tapInstalled = false
     private(set) var suspended = false
-    /// Runtime overrides (the measurement modes use them). Values: "ctrlSpace", "globe", "capsLock".
-    var disabledTriggers = Set<String>()
     let startedAt = Date()
 
     // pending switch — main thread only
@@ -102,7 +103,6 @@ final class Agent: NSObject {
     }
 
     func triggerOn(_ name: String) -> Bool {
-        if disabledTriggers.contains(name) { return false }
         switch name {
         case "hotkey": return config.triggers.hotkey
         case "globe": return config.triggers.globe
@@ -203,7 +203,7 @@ final class Agent: NSObject {
         let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?"
         records.append(SwitchRecord(at: Date().timeIntervalSince1970, trigger: trigger, from: fromID, to: target.id,
                                     selectMs: (t1 - t0) * 1000, notifyMs: nil, protectedKeys: 0, revertCaught: false, app: app, slow: false))
-        if records.count > 5000 { records.removeFirst(records.count - 1000) }
+        if records.count > maxRecords { records.removeFirst(records.count - maxRecords / 5) }
         Log.info(String(format: "switch [%@] %@ -> %@  select=%.2f ms  app=%@%@", trigger, short(fromID), short(target.id), (t1 - t0) * 1000, app, ok ? "" : "  (TISSelectInputSource FAILED)"))
         let idx = records.count - 1, stamp = records[idx].at
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
@@ -264,16 +264,17 @@ final class Agent: NSObject {
         p.arguments = ["property", "--set", "{\"UserKeyMapping\":\(mapping)}"]
         try? p.run(); p.waitUntilExit()
     }
-    private func applyCapsLockRemap() {
-        guard config.triggers.capsLock else { return }
+    func applyCapsLockRemap() {
+        guard config.triggers.capsLock, !capsRemapped else { return }
         hidutil("[{\"HIDKeyboardModifierMappingSrc\":0x700000039,\"HIDKeyboardModifierMappingDst\":0x70000006D}]")
         capsRemapped = true
         Log.info("Caps Lock remapped to F18 for the capsLock trigger")
     }
-    private func removeCapsLockRemap() {
+    func removeCapsLockRemap() {
         guard capsRemapped else { return }
         hidutil("[]")
         capsRemapped = false
+        Log.info("Caps Lock remap removed")
     }
 
     // MARK: reports
@@ -300,9 +301,8 @@ final class Agent: NSObject {
         Log.info("switch keys: \(hotkeys.map { $0.description }.joined(separator: ", "))\(config.hotkeys.isEmpty ? " (from the system's input-source hotkeys)" : " (from config)")")
     }
 
-    /// Measurement helper: force a trigger on for the duration of a run.
+    /// Measurement helper: turn a trigger on or off for the duration of a run (not saved).
     func forceTrigger(_ name: String, _ on: Bool) {
-        if on { disabledTriggers.remove(name) }
         switch name {
         case "globe": config.triggers.globe = on
         case "hotkey": config.triggers.hotkey = on
@@ -354,6 +354,7 @@ final class Agent: NSObject {
         }
         return ["switches": switches, "protectedKeys": protectedKeys, "revertsCaught": revertsCaught, "tapReenables": tapReenables,
                 "slowSwitches": slowSwitches, "noNotify": noNotify, "uptimeSec": Int(Date().timeIntervalSince(startedAt)),
+                "recorded": records.count,
                 "selectMs": agg(sel), "notifyMs": agg(notify), "byApp": byApp, "recent": recent]
     }
 }

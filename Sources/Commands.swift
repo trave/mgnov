@@ -31,8 +31,8 @@ enum Commands {
                 default: return ["ok": false, "error": "unknown trigger \(name)"]
                 }
                 agent.config.save()
-                return ["triggers": ["hotkey": agent.triggerOn("hotkey"), "globe": agent.triggerOn("globe"), "capsLock": agent.triggerOn("capsLock")],
-                        "note": name == "capsLock" ? "restart the agent to apply the Caps Lock remap" : ""]
+                if name == "capsLock" { on ? agent.applyCapsLockRemap() : agent.removeCapsLockRemap() }
+                return ["triggers": ["hotkey": agent.triggerOn("hotkey"), "globe": agent.triggerOn("globe"), "capsLock": agent.triggerOn("capsLock")]]
             }
         case "hotkey":
             let value = str("value", "").trimmingCharacters(in: .whitespaces)

@@ -67,9 +67,38 @@ through `TextInputSwitcher` keeps the cold starts and the commit-on-release.
 | cause | mgnov |
 |---|---|
 | on-demand helper, idle-killed | its own resident agent with `KeepAlive` in launchd; the system handler is set to Do Nothing |
-| commit on key release + HUD | switches on key **down** (Ctrl+Space, Caps Lock) inside the event tap, no HUD; Globe switches on release of a clean tap because a modifier can only be recognised as a tap on release |
-| letters typed before the app catches up | for 300 ms after a switch every keystroke is translated with the new layout (`UCKeyTranslate`) and the characters are written onto the event, so the app types the right letters whatever state it is in |
+| commit on key release + HUD | switches on key **down** (the hotkey, Caps Lock) inside the event tap, no HUD; Globe switches on release of a clean tap because a modifier can only be recognised as a tap on release |
+| letters typed before the app catches up | for 500 ms after a switch every keystroke is translated with the new layout (`UCKeyTranslate`) and the characters are written onto the event, so the app types the right letters whatever state it is in |
 | the switch is reverted by a race | a 700 ms watchdog re-applies the switch if the selected source flips back |
+
+## Measured with mgnov in place
+
+mgnov records every switch: the time spent in `TISSelectInputSource` and the delay until the
+system-wide "selected input source changed" notification, with the frontmost app. 48 hours of
+normal use on the same Mac (1–3 November 2026, ⌘Space, two layouts), version 0.1.0:
+
+| | |
+|---|---|
+| switches | 586 |
+| keystrokes re-translated inside the 500 ms window | 951 |
+| `TISSelectInputSource` | median 11.7 ms, p95 46.5 ms, max 105 ms |
+| notification after the key press | median 81 ms, p95 183 ms, max 317 ms |
+| notification later than 250 ms | 6 (1 %) |
+| no notification within 1 s | 0 |
+| switch reverted by the system and re-applied | 0 |
+| event tap disabled by macOS and re-enabled | 3 |
+
+The notification delay is what an app would otherwise wait for before translating keys with the
+new layout, and 951 keystrokes in 586 switches arrived inside that window: without the
+re-translation they would have come out in the old layout. The slow cases are spread over apps in
+proportion to their share of switches (Claude Desktop 4 of 357, iTerm2 1 of 81, Firefox 1 of 19);
+no app stands out. The self-test (`mgnov selftest`, typing "qwerty" 6 ms per key right after
+the switch) produced 0 wrong letters in 60.
+
+The baseline (macOS handling the same key with mgnov's tap suspended) could not be measured on
+macOS 26.5: the system switcher ignores synthetic ⌘Space, ⌃Space and Globe events posted with
+`CGEvent` (0 switches in 70 presses), so the comparison rests on the published measurements above
+and on the user-visible result.
 
 ## Sources
 
