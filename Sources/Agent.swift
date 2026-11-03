@@ -284,12 +284,7 @@ final class Agent: NSObject {
         if !tapInstalled { w.append("Event tap not installed: grant Accessibility to Mgnov.app (System Settings → Privacy & Security → Accessibility).") }
         let fnUsage = CFPreferencesCopyAppValue("AppleFnUsageType" as CFString, "com.apple.HIToolbox" as CFString) as? Int
         if triggerOn("globe"), fnUsage != 0 {
-            w.append("Globe key is still handled by macOS too (AppleFnUsageType=\(fnUsage.map(String.init) ?? "default")). Set 'Press 🌐 key to' = Do Nothing, or run scripts/install.sh.")
-        }
-        if triggerOn("hotkey") {
-            for s in Hotkey.systemHotkeys() where s.enabled && hotkeys.contains(s.hotkey) {
-                w.append("macOS still has \(s.hotkey.description) as '\(s.name)' too; mgnov swallows the keys first, but run scripts/install.sh to hand the key over for good.")
-            }
+            w.append("Globe key is still handled by macOS too (AppleFnUsageType=\(fnUsage.map(String.init) ?? "default")). Set 'Press 🌐 key to' = Do Nothing, or run scripts/install.sh --take-over-keys.")
         }
         if cycleIDs().count < 2 { w.append("Fewer than two enabled keyboard input sources; nothing to switch between.") }
         return w

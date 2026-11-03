@@ -66,7 +66,7 @@ through `TextInputSwitcher` keeps the cold starts and the commit-on-release.
 
 | cause | mgnov |
 |---|---|
-| on-demand helper, idle-killed | its own resident agent with `KeepAlive` in launchd; the system handler is set to Do Nothing |
+| on-demand helper, idle-killed | its own resident agent with `KeepAlive` in launchd that sees the key before the system handler does; the system handler stays enabled so Secure Input fields (where event taps get no keys) still switch |
 | commit on key release + HUD | switches on key **down** (the hotkey, Caps Lock) inside the event tap, no HUD; Globe switches on release of a clean tap because a modifier can only be recognised as a tap on release |
 | letters typed before the app catches up | for 500 ms after a switch every keystroke is translated with the new layout (`UCKeyTranslate`) and the characters are written onto the event, so the app types the right letters whatever state it is in |
 | the switch is reverted by a race | a 700 ms watchdog re-applies the switch if the selected source flips back |

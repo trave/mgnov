@@ -40,10 +40,10 @@ make           # builds build/Mgnov.app
 then in the terminal to let `codesign` use the key. The identity exists so that the Accessibility
 grant survives rebuilds (an ad-hoc signature changes with every build and macOS forgets the grant).
 
-**2. Install the agent (keeps your system shortcuts).**
+**2. Install the agent.**
 
 ```bash
-make install ARGS=--keep-system-keys
+make install
 ```
 
 This copies the app to `~/Applications/Mgnov.app`, loads a `KeepAlive` LaunchAgent
@@ -51,10 +51,12 @@ This copies the app to `~/Applications/Mgnov.app`, loads a `KeepAlive` LaunchAge
 **Mgnov.app** from `~/Applications` and switch it on. That is the only permission. The agent
 installs its event tap within 2 s of being trusted.
 
-With `--keep-system-keys` macOS still has your shortcut too, but mgnov sits ahead of it in the
-event chain and swallows the keys, so macOS never sees them. `make install` without the flag
-also hands the keys over for good (disables the system input-source hotkeys and sets *Press 🌐
-key to* = Do Nothing, with a backup that `make uninstall` restores). Optional.
+macOS keeps your shortcut too, but mgnov sits ahead of it in the event chain and swallows the
+keys, so macOS never sees them. The system handler stays as a fallback for Secure Input (password
+fields, a terminal with Secure Keyboard Entry), where event taps receive no keys at all.
+`make install ARGS=--take-over-keys` disables the system input-source hotkeys and sets *Press 🌐
+key to* = Do Nothing instead (backed up, `make uninstall` restores); needed only for the Globe
+trigger.
 
 **3. Check.**
 
@@ -93,12 +95,35 @@ letters, digits, punctuation. The setting lives in `config.json` as `"hotkey": "
 
 Not supported yet: switching with **Caps Lock** through the system option *Use Caps Lock to switch
 to and from ABC* (mgnov has its own Caps Lock trigger, off by default, that remaps the key with
-`hidutil`: `mgnov enable capsLock`), and the **🌐 Globe** key unless you
-hand it over with the full `make install` (then `mgnov enable globe`).
+`hidutil`: `mgnov enable capsLock`), and the **🌐 Globe** key unless you hand it over with
+`make install ARGS=--take-over-keys` (then `mgnov enable globe`).
 
-With three or more layouts mgnov cycles through all of them in system order, while macOS's
-*previous input source* toggles between the last two. `"cycle": ["com.apple.keylayout.ABC",
-"com.apple.keylayout.Russian"]` in the config limits the cycle (IDs from `mgnov sources`).
+## Privacy
+
+The agent holds an active event tap, which means it is shown every key press in your session.
+What it does with them: compares each key-down against the switch keys, and for 500 ms after a
+switch rewrites the characters on the event. It never stores or transmits keystrokes. The log
+(`~/Library/Application Support/mgnov/mgnov.log`) contains switch events with timings and the
+bundle id of the frontmost app, nothing typed. The control socket is owner-only (`0600`) and the
+agent opens no network connections. Everything is in this repository; `make` builds it from
+source on your machine.
+
+## Known limitations
+
+- **Secure Input.** In password fields and in a terminal with Secure Keyboard Entry, macOS gives
+  event taps no keys. With the default install the system handler switches there as usual; with
+  `--take-over-keys` nothing switches in those fields.
+- **Dead keys.** Inside the 500 ms re-translation window keys are translated without dead-key
+  state, so on layouts with dead keys (German, French, US International) an accented letter typed
+  right after a switch can come out as its base letter.
+- **Input methods** (Chinese, Japanese, Korean) are switched but not re-translated; untested.
+- **Three or more layouts**: mgnov cycles through all of them in system order, while macOS's
+  *previous input source* toggles between the last two. `"cycle": ["com.apple.keylayout.ABC",
+  "com.apple.keylayout.Russian"]` in the config limits the cycle (IDs from `mgnov sources`).
+- **Shortcut conflicts.** mgnov swallows its switch key before any app sees it. If you set
+  `mgnov hotkey cmd+space` while Spotlight is on ⌘Space, Spotlight stops opening.
+- **Tested on** Apple Silicon with macOS 26.5; builds on Intel with macOS 13.7, not yet run there.
+- Uninstalling does not remove the Accessibility entry; delete it in System Settings.
 
 ## Development run (no install)
 

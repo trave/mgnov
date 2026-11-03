@@ -1,0 +1,21 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (ad-hoc signed; no signing identity on the runner)
+        run: make build
+      - name: Unit tests
+        run: make test
+      - name: Scripts parse with the system bash 3.2
+        run: for f in scripts/*.sh; do /bin/bash -n "$f"; done
+      - name: CLI runs without an agent
+        run: |
+          build/mgnov version
+          build/mgnov help | head -3
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Mgnov.app/Contents/Info.plist

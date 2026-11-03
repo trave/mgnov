@@ -1,6 +1,9 @@
 #!/bin/bash
-# Installs Mgnov.app to ~/Applications, registers a KeepAlive LaunchAgent, and hands the
-# trigger keys over from macOS to mgnov (backing up the previous values).
+# Installs Mgnov.app to ~/Applications and registers a KeepAlive LaunchAgent.
+# System key settings are left alone unless --take-over-keys is given: then the system
+# input-source hotkeys are disabled and the Globe key set to Do Nothing (backed up; uninstall
+# restores). Keeping them is the safe default: in Secure Input (password fields) event taps
+# receive no keys, and macOS's own handler still switches there.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 APP_SRC="build/Mgnov.app"
@@ -12,7 +15,12 @@ BACKUP="$STATE/system-settings-backup.json"
 CONFIG="$STATE/config.json"
 UID_="$(id -u)"
 
-KEEP_KEYS=0; [ "${1:-}" = "--keep-system-keys" ] && KEEP_KEYS=1
+KEEP_KEYS=1
+case "${1:-}" in
+  --take-over-keys) KEEP_KEYS=0 ;;
+  --keep-system-keys|"") ;;
+  *) echo "usage: $0 [--take-over-keys]"; exit 2 ;;
+esac
 [ -d "$APP_SRC" ] || { echo "build first: make"; exit 1; }
 mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents" "$STATE"
 
@@ -32,7 +40,7 @@ hk_get() { /usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:$1:$2" "$HK" 
 hk_def() { case "$1:$2" in 60:2) echo 262144;; 61:2) echo 786432;; *:0) echo 32;; *:1) echo 49;; esac; }  # factory parameters
 
 if [ "$KEEP_KEYS" = "1" ]; then
-  echo "→ system key settings left untouched (--keep-system-keys)"
+  echo "→ system key settings left untouched (mgnov sees the keys first; use --take-over-keys to disable them)"
 elif [ ! -f "$BACKUP" ]; then
   fn_prev=$(defaults read com.apple.HIToolbox AppleFnUsageType 2>/dev/null || echo "unset")
   json="{\"AppleFnUsageType\": \"$fn_prev\""
